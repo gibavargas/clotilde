@@ -1,8 +1,29 @@
 #!/bin/bash
 # Deploy Clotilde to Cloud Run
 # Prerequisites: setup-gcloud.sh has been run
+#
+# Required environment variables:
+#   OPENAI_SECRET - Name of your OpenAI API key secret in Secret Manager
+#   API_SECRET    - Name of your service API key secret in Secret Manager
+#
+# Example:
+#   export OPENAI_SECRET=my-openai-key-abc123
+#   export API_SECRET=my-api-key-xyz789
+#   ./deploy.sh
 
 set -e
+
+# Check required environment variables
+if [ -z "$OPENAI_SECRET" ] || [ -z "$API_SECRET" ]; then
+    echo "ERROR: Required environment variables not set."
+    echo ""
+    echo "Please set the following environment variables:"
+    echo "  export OPENAI_SECRET=your-openai-secret-name"
+    echo "  export API_SECRET=your-api-secret-name"
+    echo ""
+    echo "These should be the names of your secrets in Secret Manager."
+    exit 1
+fi
 
 # Configuration
 PROJECT_ID=${GOOGLE_CLOUD_PROJECT:-$(gcloud config get-value project)}
@@ -17,6 +38,8 @@ echo "Building and deploying Clotilde..."
 echo "Project ID: $PROJECT_ID"
 echo "Region: $REGION"
 echo "Image: $IMAGE_NAME"
+echo "OpenAI Secret: $OPENAI_SECRET"
+echo "API Secret: $API_SECRET"
 echo ""
 
 # Build Docker image
@@ -40,7 +63,7 @@ gcloud run deploy $SERVICE_NAME \
     --max-instances 10 \
     --timeout 30 \
     --set-env-vars GOOGLE_CLOUD_PROJECT=$PROJECT_ID,PORT=8080 \
-    --set-secrets OPENAI_KEY_SECRET_NAME=YOUR_OPENAI_SECRET_NAME:latest,API_KEY_SECRET_NAME=YOUR_API_SECRET_NAME:latest \
+    --set-secrets OPENAI_KEY_SECRET_NAME=${OPENAI_SECRET}:latest,API_KEY_SECRET_NAME=${API_SECRET}:latest \
     --quiet
 
 # Get service URL

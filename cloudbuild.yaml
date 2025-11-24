@@ -44,7 +44,7 @@ steps:
       - '--set-env-vars'
       - 'GOOGLE_CLOUD_PROJECT=${PROJECT_ID}'
       - '--set-secrets'
-      - 'OPENAI_KEY_SECRET_NAME=YOUR_OPENAI_SECRET_NAME:latest,API_KEY_SECRET_NAME=YOUR_API_SECRET_NAME:latest'
+      - 'OPENAI_KEY_SECRET_NAME=${_OPENAI_SECRET}:latest,API_KEY_SECRET_NAME=${_API_SECRET}:latest'
     id: 'deploy-cloud-run'
     waitFor: ['push-image']
 
@@ -56,6 +56,8 @@ substitutions:
   _REGION: 'us-central1'
   _REPO_NAME: 'clotilde-repo'
   _SERVICE_NAME: 'clotilde'
+  _OPENAI_SECRET: 'your-openai-secret-name'  # Override with --substitutions=_OPENAI_SECRET=actual-name
+  _API_SECRET: 'your-api-secret-name'        # Override with --substitutions=_API_SECRET=actual-name
 
 timeout: '1200s'
 

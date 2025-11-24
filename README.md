@@ -54,16 +54,26 @@ gcloud artifacts repositories create $REPO_NAME \
 
 #### Create Secret Manager Secrets
 
+**Important**: Use unique, unpredictable secret names for security.
+
 ```bash
+# Generate unique secret names (recommended for security)
+export OPENAI_SECRET="my-openai-key-$(openssl rand -hex 4)"
+export API_SECRET="my-api-key-$(openssl rand -hex 4)"
+
 # Create OpenAI API key secret
-echo -n "your-openai-api-key" | gcloud secrets create openai-api-key \
+echo -n "your-openai-api-key" | gcloud secrets create $OPENAI_SECRET \
     --data-file=- \
     --replication-policy="automatic"
 
 # Create API key for authenticating requests
-echo -n "your-secure-api-key-here" | gcloud secrets create clotilde-api-key \
+echo -n "your-secure-api-key-here" | gcloud secrets create $API_SECRET \
     --data-file=- \
     --replication-policy="automatic"
+
+# Save your secret names securely (you'll need them for deployment)
+echo "OPENAI_SECRET=$OPENAI_SECRET"
+echo "API_SECRET=$API_SECRET"
 ```
 
 #### Grant Cloud Run Service Account Access
@@ -72,12 +82,12 @@ echo -n "your-secure-api-key-here" | gcloud secrets create clotilde-api-key \
 # Get the Cloud Run service account email
 export SERVICE_ACCOUNT=$(gcloud iam service-accounts list --filter="displayName:Compute Engine default service account" --format="value(email)")
 
-# Grant Secret Manager access
-gcloud secrets add-iam-policy-binding openai-api-key \
+# Grant Secret Manager access (use your secret names from above)
+gcloud secrets add-iam-policy-binding $OPENAI_SECRET \
     --member="serviceAccount:${SERVICE_ACCOUNT}" \
     --role="roles/secretmanager.secretAccessor"
 
-gcloud secrets add-iam-policy-binding clotilde-api-key \
+gcloud secrets add-iam-policy-binding $API_SECRET \
     --member="serviceAccount:${SERVICE_ACCOUNT}" \
     --role="roles/secretmanager.secretAccessor"
 ```
@@ -87,9 +97,9 @@ gcloud secrets add-iam-policy-binding clotilde-api-key \
 #### Option A: Using Cloud Build (Recommended)
 
 ```bash
-# Submit build
+# Submit build (use your secret names from the setup step)
 gcloud builds submit --config=cloudbuild.yaml \
-    --substitutions=_REGION=$REGION,_REPO_NAME=$REPO_NAME,_SERVICE_NAME=clotilde
+    --substitutions=_REGION=$REGION,_REPO_NAME=$REPO_NAME,_SERVICE_NAME=clotilde,_OPENAI_SECRET=$OPENAI_SECRET,_API_SECRET=$API_SECRET
 ```
 
 #### Option B: Manual Build and Deploy
@@ -116,7 +126,7 @@ gcloud run deploy clotilde \
     --max-instances 10 \
     --timeout 30 \
     --set-env-vars GOOGLE_CLOUD_PROJECT=$PROJECT_ID,PORT=8080 \
-    --set-secrets OPENAI_KEY_SECRET_NAME=openai-api-key:latest,API_KEY_SECRET_NAME=clotilde-api-key:latest
+    --set-secrets OPENAI_KEY_SECRET_NAME=$OPENAI_SECRET:latest,API_KEY_SECRET_NAME=$API_SECRET:latest
 ```
 
 ### 3. Get Your Service URL

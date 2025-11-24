@@ -33,7 +33,8 @@ Clotilde CarPlay Assistant implements multiple layers of security to protect use
 - **Validation**: Every request (except `/health`) requires valid API key
 
 **Configuration**:
-- Secret name: `clotilde-api-key` (configurable via `API_KEY_SECRET_NAME`)
+- Secret name: Configurable via `API_KEY_SECRET_NAME` environment variable
+- Use unique, unpredictable secret names (e.g., `my-api-key-abc123`)
 - Retrieved at startup from Secret Manager
 - Never logged or exposed in error messages
 
@@ -72,9 +73,10 @@ Clotilde CarPlay Assistant implements multiple layers of security to protect use
 
 **Implementation**: Google Secret Manager
 
-- **Secrets Stored**:
-  - `openai-api-key`: OpenAI API key
-  - `clotilde-api-key`: Service authentication key
+- **Secrets Stored** (use unique names for each deployment):
+  - OpenAI API key secret (configurable name)
+  - Service authentication key secret (configurable name)
+- **Security**: Use unique, unpredictable secret names to prevent enumeration attacks
 - **Access**: Cloud Run service account with least privilege
 - **Rotation**: Supported via Secret Manager versioning
 - **Never**: Stored in environment variables, code, or logs

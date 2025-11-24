@@ -10,7 +10,21 @@
 
 ## 5-Minute Setup
 
-### 1. Run Setup Script
+### 1. Set Secret Names
+
+Choose unique, unpredictable names for your secrets:
+
+```bash
+# Generate unique secret names (recommended for security)
+export OPENAI_SECRET="my-openai-key-$(openssl rand -hex 4)"
+export API_SECRET="my-api-key-$(openssl rand -hex 4)"
+
+# Save these names - you'll need them!
+echo "OPENAI_SECRET=$OPENAI_SECRET"
+echo "API_SECRET=$API_SECRET"
+```
+
+### 2. Run Setup Script
 
 ```bash
 chmod +x setup-gcloud.sh
@@ -20,10 +34,10 @@ chmod +x setup-gcloud.sh
 This will:
 - Enable required Google Cloud APIs
 - Create Artifact Registry repository
-- Create secrets in Secret Manager
+- Create secrets in Secret Manager (with your unique names)
 - Configure IAM permissions
 
-### 2. Deploy to Cloud Run
+### 3. Deploy to Cloud Run
 
 ```bash
 chmod +x deploy.sh
@@ -33,22 +47,23 @@ chmod +x deploy.sh
 Or use Cloud Build:
 
 ```bash
-gcloud builds submit --config=cloudbuild.yaml
+gcloud builds submit --config=cloudbuild.yaml \
+    --substitutions=_OPENAI_SECRET=$OPENAI_SECRET,_API_SECRET=$API_SECRET
 ```
 
-### 3. Get Your Service URL
+### 4. Get Your Service URL
 
 ```bash
 gcloud run services describe clotilde --region us-central1 --format="value(status.url)"
 ```
 
-### 4. Get Your API Key
+### 5. Get Your API Key
 
 ```bash
-gcloud secrets versions access latest --secret="clotilde-api-key"
+gcloud secrets versions access latest --secret="$API_SECRET"
 ```
 
-### 5. Set Up Apple Shortcut
+### 6. Set Up Apple Shortcut
 
 Follow the instructions in [SHORTCUT_SETUP.md](SHORTCUT_SETUP.md) to create the shortcut on your iPhone.
 
