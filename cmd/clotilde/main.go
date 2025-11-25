@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"regexp"
 	"runtime"
 	"strings"
 	"syscall"
@@ -39,14 +40,16 @@ Constraints and safety:
 - CRITICAL: NEVER mention URLs, website addresses, or links in your responses. Since responses are spoken aloud, URLs are useless and annoying. Instead, just mention the source name (e.g., "G1", "BBC", "Reuters") without any web addresses.
 - CRITICAL: NEVER ask questions to the user. This is a single-turn conversation with no follow-up. Always provide the best answer you can with the information available, even if incomplete. If information is missing, state what you know and acknowledge limitations, but do not ask for clarification.
 - CRITICAL: ABSOLUTELY FORBIDDEN to include any URLs, web addresses, or links. Do NOT mention "www", "http", "https", ".com", ".br", or any domain names. Do NOT say things like "você pode ver em..." or "acesse...". Only mention source names (e.g., "Segundo o G1" or "De acordo com a Reuters"). If you catch yourself about to mention a URL, stop immediately and rephrase without it.
+- CRITICAL: Even if web search returns URLs in citations, DO NOT include them in your spoken response. Extract only the information and cite the source name (e.g., "Segundo o G1" or "De acordo com a Reuters"). URLs are invisible to the user since this is a voice-only interface.
 
 Web search behavior:
 - You have access to web search capabilities that return results from the public web.
 - Use web search when the question is about current events, recent news, live prices, weather "today" or "now", or anything where fresh/real-time data is essential.
 - If the question references "today", "now", "recent", "latest", or similar time-sensitive terms, use web search.
 - For historical facts, general knowledge, or information that doesn't change, you may not need web search but you are still free to use it as you think it may be needed.
-- CRITICAL: When using web search, ALWAYS cite your sources with specific publication names (e.g., "Segundo o G1..." or "De acordo com a BBC...").
+- CRITICAL: When using web search, ALWAYS cite your sources with specific publication names (e.g., "Segundo o G1..." or "De acordo com a BBC..."). NEVER include URLs or web addresses, even if they appear in search results. Extract only the information and cite the source name.
 - When reporting news or time-sensitive information, ALWAYS include the specific date and time when available (e.g., "Segundo o G1, às 14h30 de hoje..." or "De acordo com a Reuters, na manhã de 24 de novembro...").
+- CRITICAL: Web search may return URLs in citations, but you MUST NOT include them in your response. This is a voice-only interface - URLs are completely useless and must be filtered out. Only mention publication names like "G1", "BBC", "Reuters", "Folha de S.Paulo", etc.
 - When searching for information or news about a specific country, perform the web search in that country's language (e.g., search in English for US news, Spanish for Spain/Mexico news, French for France news, etc.), but always respond in Brazilian Portuguese as usual.
 - Provide factual, objective information. Focus on what happened, when it happened, and who/what was involved. Avoid generic disclaimers about information changing or being approximate unless truly relevant.
 
@@ -424,7 +427,34 @@ func (s *Server) logRequest(requestID string, r *http.Request, input, output, mo
 	s.logger.Add(entry)
 }
 
+// removeURLsFromText removes any URLs, web addresses, or domain names from text
+// This is a safety net to ensure no URLs make it to the voice interface
+func removeURLsFromText(text string) string {
+	// Remove URLs (http://, https://, www.)
+	urlPattern := regexp.MustCompile(`(?i)(https?://|www\.)[^\s]+`)
+	text = urlPattern.ReplaceAllString(text, "")
+	
+	// Remove domain patterns like "example.com" or "g1.com.br"
+	domainPattern := regexp.MustCompile(`(?i)\b[a-z0-9]+([.-][a-z0-9]+)*\.(com|br|org|net|gov|edu|io|co|info|me|tv|xyz)[^\s]*`)
+	text = domainPattern.ReplaceAllString(text, "")
+	
+	// Remove phrases that might lead to URLs
+	text = strings.ReplaceAll(text, "você pode ver em", "")
+	text = strings.ReplaceAll(text, "acesse", "")
+	text = strings.ReplaceAll(text, "visite", "")
+	text = strings.ReplaceAll(text, "veja em", "")
+	
+	// Clean up extra spaces
+	spacePattern := regexp.MustCompile(`\s+`)
+	text = spacePattern.ReplaceAllString(text, " ")
+	
+	return strings.TrimSpace(text)
+}
+
 func respondSuccess(w http.ResponseWriter, response string) {
+	// Remove any URLs that might have escaped the system prompt
+	response = removeURLsFromText(response)
+	
 	w.Header().Set("Content-Type", "application/json")
 	// CORS restricted to Apple Shortcuts origin for security
 	setCORSHeaders(w)
@@ -518,9 +548,21 @@ func (s *Server) createResponse(ctx context.Context, route RouteDecision, instru
 
 	// Set reasoning effort only for models that support it (o1, o3, gpt-5 series)
 	// Models like gpt-4o, gpt-4-turbo don't support reasoning parameter
-	if route.ReasoningEffort != "" && modelSupportsReasoning(route.Model) {
-		reqBody.Reasoning = &ReasoningConfig{Effort: route.ReasoningEffort}
-		log.Printf("Reasoning effort: %s", route.ReasoningEffort)
+	// IMPORTANT: gpt-5 requires reasoning >= "low" for web search to work
+	// According to OpenAI docs: "Web search is currently not supported in gpt-5 with minimal reasoning"
+	if modelSupportsReasoning(route.Model) {
+		reasoningEffort := route.ReasoningEffort
+		// If using gpt-5 with web search, must use at least "low" reasoning
+		if strings.HasPrefix(route.Model, "gpt-5") && route.WebSearch {
+			if reasoningEffort == "" || reasoningEffort == "none" {
+				reasoningEffort = "low" // Minimum required for web search
+				log.Printf("gpt-5 with web search: using reasoning='low' (minimum required)")
+			}
+		}
+		if reasoningEffort != "" && reasoningEffort != "none" {
+			reqBody.Reasoning = &ReasoningConfig{Effort: reasoningEffort}
+			log.Printf("Reasoning effort: %s", reasoningEffort)
+		}
 	}
 
 	jsonData, err := json.Marshal(reqBody)
@@ -668,10 +710,15 @@ func (s *Server) routeToModel(ctx context.Context, question string) RouteDecisio
 
 	// BOTH: Use premium model WITH web search (premium - complex + current data)
 	if strings.Contains(decision, "both") {
+		reasoningEffort := "none" // Default: disable reasoning to save cost
+		// gpt-5 requires reasoning >= "low" for web search to work
+		if strings.HasPrefix(premiumModel, "gpt-5") {
+			reasoningEffort = "low" // Minimum required for web search
+		}
 		return RouteDecision{
 			Model:           premiumModel,
 			WebSearch:       true,
-			ReasoningEffort: "none", // Disable reasoning to save cost
+			ReasoningEffort: reasoningEffort,
 		}
 	}
 
@@ -680,7 +727,7 @@ func (s *Server) routeToModel(ctx context.Context, question string) RouteDecisio
 		return RouteDecision{
 			Model:           premiumModel,
 			WebSearch:       false,
-			ReasoningEffort: "none", // Disable reasoning to save cost
+			ReasoningEffort: "none", // Disable reasoning to save cost (no web search needed)
 		}
 	}
 
