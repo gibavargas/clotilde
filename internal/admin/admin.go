@@ -68,28 +68,29 @@ func (h *Handler) generateCSRFToken() string {
 	return token
 }
 
-// validateCSRFToken checks if a CSRF token is valid
+// validateCSRFToken checks if a CSRF token is valid and consumes it (single-use)
 func (h *Handler) validateCSRFToken(token string) bool {
 	if token == "" {
 		return false
 	}
 	
-	h.csrfMutex.RLock()
-	expiresAt, exists := h.csrfTokens[token]
-	h.csrfMutex.RUnlock()
+	h.csrfMutex.Lock()
+	defer h.csrfMutex.Unlock()
 	
+	expiresAt, exists := h.csrfTokens[token]
 	if !exists {
 		return false
 	}
 	
+	// Check if token is expired
 	if time.Now().After(expiresAt) {
 		// Token expired, remove it
-		h.csrfMutex.Lock()
 		delete(h.csrfTokens, token)
-		h.csrfMutex.Unlock()
 		return false
 	}
 	
+	// Token is valid - consume it (delete) to prevent replay attacks
+	delete(h.csrfTokens, token)
 	return true
 }
 

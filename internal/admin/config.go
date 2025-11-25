@@ -48,23 +48,30 @@ func GetConfig() RuntimeConfig {
 // SetConfig updates the runtime configuration
 // Returns error if validation fails
 func SetConfig(newConfig RuntimeConfig) error {
-	// Validate model names
+	// Validate model names - all models that support Responses API
 	validStandardModels := map[string]bool{
-		"gpt-4.1-nano": true,
-		"gpt-4.1-mini": true,
-		"gpt-4o-mini":  true,
+		// Fast/cheap models
+		"gpt-4.1-nano":  true,
+		"gpt-4.1-mini":  true,
+		"gpt-4o-mini":   true,
 		"gpt-3.5-turbo": true,
+		"gpt-5-nano":    true,
+		"gpt-5-mini":    true,
 	}
 	
 	validPremiumModels := map[string]bool{
-		"gpt-4.1":      true,
-		"gpt-4o":       true,
-		"gpt-4o-2024-08-06": true,
-		"chatgpt-4o-latest": true,
-		"gpt-4-turbo":  true,
-		"o4-mini":      true,
-		"o3":           true,
-		"gpt-5.1":      true,
+		// Powerful/complex models
+		"gpt-4.1":            true,
+		"gpt-4o":             true,
+		"gpt-4o-2024-08-06":  true,
+		"chatgpt-4o-latest":  true,
+		"gpt-4-turbo":        true,
+		"o4-mini":            true,
+		"o3":                 true,
+		"o3-mini":            true,
+		"gpt-5":              true,
+		"gpt-5.1":            true,
+		"gpt-5-pro":          true,
 	}
 	
 	if !validStandardModels[newConfig.StandardModel] {
