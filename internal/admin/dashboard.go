@@ -659,28 +659,61 @@ const dashboardHTML = `<!DOCTYPE html>
                 <div class="form-group">
                     <label class="form-label">Standard Model (Simple/Fast)</label>
                     <select class="form-control" id="standardModel">
-                        <option value="gpt-4.1-nano">gpt-4.1-nano (Cheapest)</option>
-                        <option value="gpt-4.1-mini">gpt-4.1-mini (Balanced)</option>
-                        <option value="gpt-5-nano">gpt-5-nano (Fastest GPT-5)</option>
-                        <option value="gpt-5-mini">gpt-5-mini (Fast GPT-5)</option>
-                        <option value="gpt-4o-mini">gpt-4o-mini (Legacy)</option>
-                        <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
+                        <optgroup label="Confirmed Working">
+                            <option value="gpt-4o-mini">gpt-4o-mini (Recommended)</option>
+                            <option value="gpt-4o">gpt-4o</option>
+                            <option value="gpt-4-turbo">gpt-4-turbo</option>
+                            <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
+                        </optgroup>
+                        <optgroup label="GPT-4.1 Series">
+                            <option value="gpt-4.1-nano">gpt-4.1-nano</option>
+                            <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+                            <option value="gpt-4.1">gpt-4.1</option>
+                        </optgroup>
+                        <optgroup label="GPT-5 Series">
+                            <option value="gpt-5-nano">gpt-5-nano</option>
+                            <option value="gpt-5-mini">gpt-5-mini</option>
+                            <option value="gpt-5">gpt-5</option>
+                            <option value="gpt-5.1">gpt-5.1</option>
+                            <option value="gpt-5-pro">gpt-5-pro</option>
+                        </optgroup>
+                        <optgroup label="O-Series (Reasoning)">
+                            <option value="o1-mini">o1-mini</option>
+                            <option value="o3-mini">o3-mini</option>
+                            <option value="o4-mini">o4-mini</option>
+                        </optgroup>
                     </select>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Premium Model (Complex/Deep)</label>
                     <select class="form-control" id="premiumModel">
-                        <option value="gpt-4.1">gpt-4.1 (Recommended)</option>
-                        <option value="gpt-5.1">gpt-5.1 (Latest Flagship)</option>
-                        <option value="gpt-5">gpt-5 (Base)</option>
-                        <option value="gpt-5-pro">gpt-5-pro (Pro Version)</option>
-                        <option value="o3">o3 (Advanced Reasoning)</option>
-                        <option value="o3-mini">o3-mini (Reasoning Mini)</option>
-                        <option value="o4-mini">o4-mini (Reasoning)</option>
-                        <option value="gpt-4o">gpt-4o</option>
-                        <option value="gpt-4o-2024-08-06">gpt-4o-2024-08-06</option>
-                        <option value="chatgpt-4o-latest">chatgpt-4o-latest</option>
-                        <option value="gpt-4-turbo">gpt-4-turbo</option>
+                        <optgroup label="Confirmed Working">
+                            <option value="gpt-4o">gpt-4o (Recommended)</option>
+                            <option value="gpt-4o-mini">gpt-4o-mini</option>
+                            <option value="gpt-4-turbo">gpt-4-turbo</option>
+                            <option value="gpt-4o-2024-08-06">gpt-4o-2024-08-06</option>
+                            <option value="chatgpt-4o-latest">chatgpt-4o-latest</option>
+                        </optgroup>
+                        <optgroup label="GPT-4.1 Series">
+                            <option value="gpt-4.1">gpt-4.1</option>
+                            <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+                            <option value="gpt-4.1-nano">gpt-4.1-nano</option>
+                        </optgroup>
+                        <optgroup label="GPT-5 Series">
+                            <option value="gpt-5.1">gpt-5.1 (Flagship)</option>
+                            <option value="gpt-5">gpt-5</option>
+                            <option value="gpt-5-pro">gpt-5-pro</option>
+                            <option value="gpt-5-mini">gpt-5-mini</option>
+                            <option value="gpt-5-nano">gpt-5-nano</option>
+                        </optgroup>
+                        <optgroup label="O-Series (Reasoning)">
+                            <option value="o3">o3 (Advanced)</option>
+                            <option value="o3-mini">o3-mini</option>
+                            <option value="o4-mini">o4-mini</option>
+                            <option value="o1">o1</option>
+                            <option value="o1-mini">o1-mini</option>
+                            <option value="o1-pro">o1-pro</option>
+                        </optgroup>
                     </select>
                 </div>
             </div>

@@ -514,8 +514,9 @@ func (s *Server) createResponse(ctx context.Context, route RouteDecision, instru
 		log.Printf("Web search enabled for this request")
 	}
 
-	// Set reasoning effort for models that support it (gpt-5.1)
-	if route.ReasoningEffort != "" {
+	// Set reasoning effort only for models that support it (o1, o3, gpt-5 series)
+	// Models like gpt-4o, gpt-4-turbo don't support reasoning parameter
+	if route.ReasoningEffort != "" && modelSupportsReasoning(route.Model) {
 		reqBody.Reasoning = &ReasoningConfig{Effort: route.ReasoningEffort}
 		log.Printf("Reasoning effort: %s", route.ReasoningEffort)
 	}
@@ -685,9 +686,26 @@ func (s *Server) routeToModel(ctx context.Context, question string) RouteDecisio
 	return defaultDecision
 }
 
+// modelSupportsReasoning checks if a model supports the reasoning parameter
+// Only o-series and gpt-5 series models support reasoning configuration
+func modelSupportsReasoning(model string) bool {
+	reasoningModels := []string{
+		"o1", "o1-mini", "o1-pro",
+		"o3", "o3-mini",
+		"o4-mini",
+		"gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5-pro", "gpt-5.1",
+	}
+	for _, m := range reasoningModels {
+		if strings.HasPrefix(model, m) {
+			return true
+		}
+	}
+	return false
+}
+
 // Cost optimization notes:
 // - SIMPLE: gpt-4o-mini, no search (cheapest)
 // - SEARCH: gpt-4o-mini + web search (simple questions needing current data)
-// - COMPLEX: gpt-5.1, no search, reasoning=none (deep analysis, no current data)
-// - BOTH: gpt-5.1 + web search, reasoning=none (deep analysis + current data)
+// - COMPLEX: premium model, no search (deep analysis, no current data)
+// - BOTH: premium model + web search (deep analysis + current data)
 // This smart routing reduces costs significantly vs always using premium models

@@ -16,7 +16,7 @@ var (
 	runtimeConfig = RuntimeConfig{
 		SystemPrompt:  "", // Will be initialized with default from main.go
 		StandardModel: "gpt-4o-mini",
-		PremiumModel:  "gpt-4.1",
+		PremiumModel:  "gpt-4o", // Default to gpt-4o which is confirmed working
 	}
 	initialized = false
 )
@@ -48,37 +48,40 @@ func GetConfig() RuntimeConfig {
 // SetConfig updates the runtime configuration
 // Returns error if validation fails
 func SetConfig(newConfig RuntimeConfig) error {
-	// Validate model names - all models that support Responses API
-	validStandardModels := map[string]bool{
-		// Fast/cheap models
-		"gpt-4.1-nano":  true,
-		"gpt-4.1-mini":  true,
-		"gpt-4o-mini":   true,
-		"gpt-3.5-turbo": true,
-		"gpt-5-nano":    true,
-		"gpt-5-mini":    true,
-	}
-	
-	validPremiumModels := map[string]bool{
-		// Powerful/complex models
-		"gpt-4.1":            true,
+	// All models that support Responses API - can be used in either list
+	validModels := map[string]bool{
+		// GPT-4o series (confirmed working)
 		"gpt-4o":             true,
+		"gpt-4o-mini":        true,
 		"gpt-4o-2024-08-06":  true,
 		"chatgpt-4o-latest":  true,
+		// GPT-4 series
 		"gpt-4-turbo":        true,
-		"o4-mini":            true,
-		"o3":                 true,
-		"o3-mini":            true,
+		"gpt-3.5-turbo":      true,
+		// GPT-4.1 series (may require specific API access)
+		"gpt-4.1":            true,
+		"gpt-4.1-mini":       true,
+		"gpt-4.1-nano":       true,
+		// GPT-5 series (may require specific API access)
 		"gpt-5":              true,
 		"gpt-5.1":            true,
+		"gpt-5-mini":         true,
+		"gpt-5-nano":         true,
 		"gpt-5-pro":          true,
+		// O-series reasoning models
+		"o1":                 true,
+		"o1-mini":            true,
+		"o1-pro":             true,
+		"o3":                 true,
+		"o3-mini":            true,
+		"o4-mini":            true,
 	}
 	
-	if !validStandardModels[newConfig.StandardModel] {
+	if !validModels[newConfig.StandardModel] {
 		return &ConfigError{Field: "standard_model", Message: "Invalid standard model"}
 	}
 	
-	if !validPremiumModels[newConfig.PremiumModel] {
+	if !validModels[newConfig.PremiumModel] {
 		return &ConfigError{Field: "premium_model", Message: "Invalid premium model"}
 	}
 	
