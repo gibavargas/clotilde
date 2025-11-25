@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"net/http"
+	"strings"
 )
 
 // Context key for request ID
@@ -40,6 +41,9 @@ func RequestIDMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Check if request already has an ID (from upstream proxy)
 		requestID := r.Header.Get("X-Request-ID")
+		if requestID != "" {
+			requestID = sanitizeRequestID(requestID)
+		}
 		if requestID == "" {
 			requestID = GenerateRequestID()
 		}
@@ -51,5 +55,30 @@ func RequestIDMiddleware(next http.Handler) http.Handler {
 		ctx := WithRequestID(r.Context(), requestID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+const maxRequestIDLength = 64
+
+func sanitizeRequestID(id string) string {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ""
+	}
+
+	if len(id) > maxRequestIDLength {
+		id = id[:maxRequestIDLength]
+	}
+
+	for _, r := range id {
+		if (r >= 'a' && r <= 'z') ||
+			(r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') ||
+			r == '-' || r == '_' {
+			continue
+		}
+		// Invalid character found; reject entire header value
+		return ""
+	}
+	return id
 }
 

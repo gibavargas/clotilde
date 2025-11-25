@@ -2,12 +2,16 @@ package admin
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"log"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/clotilde/carplay-assistant/internal/logging"
@@ -21,18 +25,88 @@ type Config struct {
 
 // Handler handles admin routes
 type Handler struct {
-	config Config
-	logger *logging.Logger
+	config     Config
+	logger     *logging.Logger
+	csrfTokens map[string]time.Time
+	csrfMutex  sync.RWMutex
+}
+
+// csrfToken represents a CSRF token with expiration
+type csrfToken struct {
+	Token     string
+	ExpiresAt time.Time
 }
 
 // NewHandler creates a new admin handler
 func NewHandler(logger *logging.Logger) *Handler {
-	return &Handler{
+	h := &Handler{
 		config: Config{
 			Username: os.Getenv("ADMIN_USER"),
 			Password: os.Getenv("ADMIN_PASSWORD"),
 		},
-		logger: logger,
+		logger:     logger,
+		csrfTokens: make(map[string]time.Time),
+	}
+	// Start cleanup goroutine for expired tokens
+	go h.cleanupExpiredTokens()
+	return h
+}
+
+// generateCSRFToken creates a new CSRF token
+func (h *Handler) generateCSRFToken() string {
+	bytes := make([]byte, 32)
+	if _, err := rand.Read(bytes); err != nil {
+		log.Printf("Error generating CSRF token: %v", err)
+		return ""
+	}
+	token := base64.URLEncoding.EncodeToString(bytes)
+	
+	h.csrfMutex.Lock()
+	h.csrfTokens[token] = time.Now().Add(24 * time.Hour) // Token valid for 24 hours
+	h.csrfMutex.Unlock()
+	
+	return token
+}
+
+// validateCSRFToken checks if a CSRF token is valid
+func (h *Handler) validateCSRFToken(token string) bool {
+	if token == "" {
+		return false
+	}
+	
+	h.csrfMutex.RLock()
+	expiresAt, exists := h.csrfTokens[token]
+	h.csrfMutex.RUnlock()
+	
+	if !exists {
+		return false
+	}
+	
+	if time.Now().After(expiresAt) {
+		// Token expired, remove it
+		h.csrfMutex.Lock()
+		delete(h.csrfTokens, token)
+		h.csrfMutex.Unlock()
+		return false
+	}
+	
+	return true
+}
+
+// cleanupExpiredTokens periodically removes expired tokens
+func (h *Handler) cleanupExpiredTokens() {
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+	
+	for range ticker.C {
+		h.csrfMutex.Lock()
+		now := time.Now()
+		for token, expiresAt := range h.csrfTokens {
+			if now.After(expiresAt) {
+				delete(h.csrfTokens, token)
+			}
+		}
+		h.csrfMutex.Unlock()
 	}
 }
 
@@ -72,8 +146,24 @@ func (h *Handler) BasicAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 
 // HandleDashboard serves the admin dashboard HTML page
 func (h *Handler) HandleDashboard(w http.ResponseWriter, r *http.Request) {
+	// Generate CSRF token for this session
+	csrfToken := h.generateCSRFToken()
+	
+	// Inject CSRF token into dashboard HTML
+	html := dashboardHTML
+	if csrfToken != "" {
+		// Replace placeholder with actual token
+		html = replaceCSRFToken(html, csrfToken)
+	}
+	
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(dashboardHTML))
+	w.Write([]byte(html))
+}
+
+// replaceCSRFToken injects CSRF token into dashboard HTML
+func replaceCSRFToken(html, token string) string {
+	// Replace {{CSRF_TOKEN}} placeholder with actual token
+	return strings.ReplaceAll(html, "{{CSRF_TOKEN}}", token)
 }
 
 // HandleLogs returns log entries as JSON, querying Cloud Logging when needed
@@ -243,6 +333,13 @@ func (h *Handler) HandleGetConfig(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleSetConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Validate CSRF token
+	csrfToken := r.Header.Get("X-CSRF-Token")
+	if !h.validateCSRFToken(csrfToken) {
+		http.Error(w, "Invalid or missing CSRF token", http.StatusForbidden)
 		return
 	}
 

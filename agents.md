@@ -548,171 +548,188 @@ After implementing this feature, verify:
 
 ---
 
-## ⚙️ Dynamic Runtime Configuration (2025-01-XX)
+## ⚙️ Dynamic Runtime Configuration (Admin UI Feature)
 
 ### Overview
 
-**Date Implemented**: 2025-01-XX  
-**Severity**: 🟢 Feature Enhancement  
-**Impact**: Enables runtime configuration changes without redeployment, reducing Cloud Run costs
+**Date Implemented**: 2025-11-25  
+**Feature**: Dynamic system prompt and model selection without redeployment  
+**Impact**: Saves Cloud Run costs by avoiding redeployment for configuration changes
 
-### Why This Was Implemented
+### What Was Added
 
-Previously, changing the system prompt or model selection required:
-1. Editing code in `main.go`
-2. Rebuilding the Docker image
-3. Redeploying to Cloud Run
-4. Waiting for new instance to start
+The admin UI now supports runtime configuration changes:
+1. **System Prompt**: Editable via admin UI, takes effect immediately
+2. **Model Selection**: Switch between OpenAI models that support the Responses API
 
-This process:
-- Costs money (Cloud Run charges for build time and cold starts)
-- Takes time (several minutes per change)
-- Requires code changes and git commits for simple config tweaks
+### Architecture
 
-### The Solution
+```
+┌─────────────────┐       ┌──────────────────────┐       ┌─────────────────┐
+│   Admin UI      │ ───── │  /admin/config       │ ───── │  RuntimeConfig  │
+│  (dashboard.go) │ POST  │  (admin.go handlers) │       │  (config.go)    │
+└─────────────────┘       └──────────────────────┘       └─────────────────┘
+                                                                  │
+                                                                  ▼
+                                                         ┌─────────────────┐
+                                                         │   handleChat    │
+                                                         │   routeToModel  │
+                                                         │   (main.go)     │
+                                                         └─────────────────┘
+```
 
-**Implementation**: Thread-safe in-memory configuration store with admin UI integration:
+### Files Added/Modified
 
-1. **Configuration Store** (`internal/admin/config.go`):
-   - `RuntimeConfig` struct: `SystemPrompt`, `StandardModel`, `PremiumModel`
-   - Thread-safe using `sync.RWMutex` (read-heavy, write-rarely pattern)
-   - Default values initialized at startup from constants
-   - Validation for model names and non-empty system prompt
+| File | Purpose |
+|------|---------|
+| `internal/admin/config.go` | Thread-safe in-memory configuration store |
+| `internal/admin/admin.go` | GET/POST handlers for `/admin/config` |
+| `internal/admin/dashboard.go` | Updated model dropdowns for Responses API models |
+| `cmd/clotilde/main.go` | Uses `admin.GetConfig()` for dynamic values |
 
-2. **Admin API Endpoints** (`internal/admin/admin.go`):
-   - `GET /admin/config`: Returns current configuration as JSON
-   - `POST /admin/config`: Updates configuration (validates before saving)
-   - Both protected by HTTP Basic Auth
+### Critical Code Paths (For AI Maintainers)
 
-3. **Main Integration** (`cmd/clotilde/main.go`):
-   - `SetDefaultConfig()` called at startup with default system prompt template
-   - `handleChat()` uses `admin.GetConfig()` for dynamic system prompt
-   - `routeToModel()` uses `admin.GetConfig()` for dynamic model selection
+#### 1. Configuration Store (`internal/admin/config.go`)
 
-4. **Frontend UI** (`internal/admin/dashboard.go`):
-   - Settings card with system prompt textarea and model dropdowns
-   - JavaScript `loadConfig()` and `saveConfig()` functions
-   - Toast notifications for success/error feedback
+```go
+// Thread-safe singleton pattern
+var (
+    configMutex   sync.RWMutex
+    runtimeConfig = RuntimeConfig{...}
+    initialized   = false
+)
+```
 
-### Critical Code Parts That Could Break
+**CRITICAL**: 
+- Always use `GetConfig()` to read (uses `RLock`)
+- Always use `SetConfig()` to write (uses `Lock`)
+- Never access `runtimeConfig` directly from outside the package
 
-⚠️ **CRITICAL**: These parts must be handled carefully to avoid breaking the system:
+#### 2. Default Initialization (`main.go`)
 
-1. **System Prompt Template Format** (`cmd/clotilde/main.go:386`):
-   ```go
-   systemPrompt := fmt.Sprintf(config.SystemPrompt, currentTime)
-   ```
-   - **BREAKS IF**: System prompt doesn't contain `%s` placeholder
-   - **FIX**: Validation in `SetConfig()` ensures prompt is not empty, but doesn't check for `%s`
-   - **NOTE**: If `%s` is missing, `fmt.Sprintf` will still work but won't substitute the date/time
-   - **RECOMMENDATION**: Frontend UI shows hint: "Use `%s` as a placeholder for the current date/time"
+```go
+// Called once at startup AFTER admin handler is created
+admin.SetDefaultConfig(clotildeSystemPromptTemplate)
+```
 
-2. **Config Initialization Order** (`cmd/clotilde/main.go:222`):
-   ```go
-   admin.SetDefaultConfig(clotildeSystemPromptTemplate)
-   ```
-   - **BREAKS IF**: Called after first request (config would be empty)
-   - **FIX**: Must be called during `main()` initialization, before starting server
-   - **NOTE**: `SetDefaultConfig()` only sets if not already initialized (idempotent)
+**CRITICAL**: 
+- Must be called after admin routes are registered
+- If not called, system prompt will be empty
+- The `initialized` flag prevents overwriting config on subsequent calls
 
-3. **Thread Safety** (`internal/admin/config.go:14-22`):
-   ```go
-   var (
-       configMutex sync.RWMutex
-       runtimeConfig = RuntimeConfig{...}
-       initialized = false
-   )
-   ```
-   - **BREAKS IF**: Mutex not used correctly (race conditions)
-   - **FIX**: All reads use `RLock()`, writes use `Lock()`
-   - **NOTE**: `GetConfig()` returns a copy, so concurrent reads are safe
+#### 3. Model Validation (`config.go`)
 
-4. **Model Validation** (`internal/admin/config.go:50-76`):
-   ```go
-   if !validStandardModels[newConfig.StandardModel] {
-       return &ConfigError{Field: "standard_model", Message: "Invalid standard model"}
-   }
-   ```
-   - **BREAKS IF**: New OpenAI models added but not in validation map
-   - **FIX**: Must update `validStandardModels` or `validPremiumModels` maps
-   - **NOTE**: Router uses standard model, so invalid model would break routing
+```go
+validStandardModels := map[string]bool{
+    "gpt-4.1-nano": true,
+    "gpt-4.1-mini": true,
+    "gpt-4o-mini":  true,
+    "gpt-3.5-turbo": true,
+}
+```
 
-5. **Router Model Usage** (`cmd/clotilde/main.go:617`):
-   ```go
-   routerResp, err := s.openaiClient.CreateChatCompletion(routerCtx, openai.ChatCompletionRequest{
-       Model: standardModel,  // Uses dynamic config
-   ```
-   - **BREAKS IF**: Standard model doesn't support Chat Completions API (router uses old API)
-   - **FIX**: Router must use a model that supports Chat Completions (not Responses API)
-   - **NOTE**: Responses API models (gpt-4.1, etc.) may not work with router - router needs Chat Completions compatible model
+**CRITICAL**: 
+- If you add models to the dashboard dropdown, you MUST add them here too
+- Validation is strict - invalid models are rejected with HTTP 400
+- Keep the lists in sync between `config.go` and `dashboard.go`
 
-6. **Empty Config Edge Case** (`internal/admin/config.go:51-54`):
-   ```go
-   if strings.TrimSpace(newConfig.SystemPrompt) == "" {
-       return &ConfigError{Field: "system_prompt", Message: "System prompt cannot be empty"}
-   }
-   ```
-   - **BREAKS IF**: Validation removed or bypassed
-   - **FIX**: Validation prevents empty prompts, but if somehow empty, `fmt.Sprintf` would still work (just no substitution)
+#### 4. Dynamic Model Usage (`main.go`)
 
-### Files Changed
+```go
+func (s *Server) routeToModel(ctx context.Context, question string) RouteDecision {
+    config := admin.GetConfig()
+    standardModel := config.StandardModel
+    premiumModel := config.PremiumModel
+    // ... uses these instead of hardcoded values
+}
+```
 
-| File | Change |
-|------|--------|
-| `internal/admin/config.go` | New file - thread-safe config store with validation |
-| `internal/admin/admin.go` | Added `HandleGetConfig`, `HandleSetConfig`, registered routes |
-| `internal/admin/dashboard.go` | Updated model dropdowns with Responses API compatible models |
-| `cmd/clotilde/main.go` | Integrated dynamic config for system prompt and model selection |
+**CRITICAL**:
+- Config is fetched on EVERY request (not cached)
+- This ensures changes take effect immediately
+- The RWMutex makes this fast for concurrent reads
 
-### Model Options
+### Potential Breaking Points
 
-**Standard Models** (fast/cheap, for simple queries):
-- `gpt-4.1-nano` (cheapest)
-- `gpt-4.1-mini` (balanced)
-- `gpt-4o-mini` (legacy)
-- `gpt-3.5-turbo` (legacy)
+1. **Model name mismatch**: If dashboard has a model not in validation list → HTTP 400 on save
+2. **Empty system prompt**: If `SetDefaultConfig()` not called → empty prompts sent to OpenAI
+3. **Invalid format string**: System prompt must have exactly one `%s` for date/time injection
+4. **Concurrent modification**: Safe due to mutex, but excessive writes could slow reads
 
-**Premium Models** (powerful, for complex queries):
-- `gpt-4.1` (recommended)
-- `gpt-4o`
-- `gpt-4o-2024-08-06`
-- `chatgpt-4o-latest`
-- `gpt-4-turbo`
-- `o4-mini` (reasoning)
-- `o3` (advanced reasoning)
-- `gpt-5.1` (preview)
+### Testing Checklist
 
-### Usage
+- [ ] Admin UI loads current config on page load
+- [ ] Save button updates config (check toast notification)
+- [ ] Changes take effect immediately (no restart needed)
+- [ ] Invalid models are rejected with error message
+- [ ] System prompt with `%s` placeholder works correctly
+- [ ] Model dropdown options match validation list
 
-1. **Access Admin Dashboard**: `https://your-service-url.run.app/admin/`
-2. **Edit Configuration**: Change system prompt or model selection in settings card
-3. **Save Changes**: Click "Save Changes" button
-4. **Immediate Effect**: Changes apply to all new requests (no redeployment needed)
+### Supported Models (Responses API)
 
-### Benefits
+**Standard (Fast/Cheap)**:
+- `gpt-4.1-nano` - Cheapest option
+- `gpt-4.1-mini` - Balanced performance/cost
+- `gpt-4o-mini` - Legacy, still supported
+- `gpt-3.5-turbo` - Older model
 
-1. **Cost Savings**: No redeployment costs for config changes
-2. **Faster Iteration**: Test prompt changes in seconds, not minutes
-3. **No Downtime**: Changes apply immediately without service restart
-4. **Easy A/B Testing**: Quickly switch between models or prompts
-
-### Limitations
-
-1. **Per-Instance**: Config is in-memory, resets on instance restart (uses defaults)
-2. **No Persistence**: Changes lost on Cloud Run instance restart
-3. **No History**: No audit log of config changes (could be added later)
-4. **Single Instance**: Each Cloud Run instance has its own config (not shared)
-
-### Future Enhancements
-
-- Persist config to database or Secret Manager
-- Config change audit log
-- Config versioning/rollback
-- Multi-instance config sync (via database)
+**Premium (Powerful)**:
+- `gpt-4.1` - Recommended for complex queries
+- `gpt-4o` - Previous generation flagship
+- `gpt-4o-2024-08-06` - Specific snapshot
+- `chatgpt-4o-latest` - Latest ChatGPT model
+- `gpt-4-turbo` - High performance
+- `o4-mini` - Reasoning model (cheaper)
+- `o3` - Advanced reasoning
+- `gpt-5.1` - Preview/experimental
 
 ---
 
-**Last Updated**: 2025-01-XX  
+## 🚨 Common Issues and Fixes for AI Models
+
+### Issue: "empty response from API"
+
+**Cause**: The Responses API response format changed or model doesn't support it.
+
+**Fix in `createResponse()` (`main.go`)**:
+```go
+// Parse output array correctly
+if outputArr, ok := apiResp.Output.([]interface{}); ok {
+    for _, item := range outputArr {
+        if itemMap, ok := item.(map[string]interface{}); ok {
+            if itemType, ok := itemMap["type"].(string); ok && itemType == "message" {
+                // Extract text from content array
+            }
+        }
+    }
+}
+```
+
+### Issue: Config changes don't take effect
+
+**Cause**: Reading from const instead of `admin.GetConfig()`.
+
+**Check**: Search for `clotildeSystemPromptTemplate` - it should only appear in:
+1. The const definition
+2. The `SetDefaultConfig()` call
+
+### Issue: "Invalid standard model" or "Invalid premium model"
+
+**Cause**: Model in dropdown not in validation list.
+
+**Fix**: Add the model to both:
+1. `internal/admin/config.go` - `validStandardModels` or `validPremiumModels` map
+2. `internal/admin/dashboard.go` - The HTML `<select>` element
+
+### Issue: Race condition in config access
+
+**Cause**: Accessing `runtimeConfig` without mutex.
+
+**Prevention**: NEVER export `runtimeConfig`. Only use `GetConfig()` and `SetConfig()`.
+
+---
+
+**Last Updated**: 2025-11-25  
 **Status**: Implemented ✅  
 **Breaking Changes**: None (backward compatible)
 

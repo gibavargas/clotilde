@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"strings"
 	"sync"
 )
 
@@ -49,11 +48,6 @@ func GetConfig() RuntimeConfig {
 // SetConfig updates the runtime configuration
 // Returns error if validation fails
 func SetConfig(newConfig RuntimeConfig) error {
-	// Validate system prompt is not empty
-	if strings.TrimSpace(newConfig.SystemPrompt) == "" {
-		return &ConfigError{Field: "system_prompt", Message: "System prompt cannot be empty"}
-	}
-	
 	// Validate model names
 	validStandardModels := map[string]bool{
 		"gpt-4.1-nano": true,

@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"sync"
+	"time"
 
 	"cloud.google.com/go/logging"
 )
@@ -20,6 +21,8 @@ type CloudLogger struct {
 var (
 	cloudLogger     *CloudLogger
 	cloudLoggerOnce sync.Once
+	flushTicker     *time.Ticker
+	flushStop       chan bool
 )
 
 // GetCloudLogger returns the singleton Cloud Logger instance
@@ -46,8 +49,41 @@ func GetCloudLogger() *CloudLogger {
 		cloudLogger.logger = client.Logger("clotilde-requests")
 		cloudLogger.enabled = true
 		log.Printf("Cloud Logging enabled for project: %s", projectID)
+
+		// Start periodic flush (every 10 seconds) to ensure logs are sent before container restarts
+		startPeriodicFlush()
 	})
 	return cloudLogger
+}
+
+// startPeriodicFlush starts a goroutine that flushes logs every 10 seconds
+func startPeriodicFlush() {
+	flushTicker = time.NewTicker(10 * time.Second)
+	flushStop = make(chan bool)
+
+	go func() {
+		for {
+			select {
+			case <-flushTicker.C:
+				cloudLogger := GetCloudLogger()
+				if cloudLogger.IsEnabled() {
+					if err := cloudLogger.Flush(); err != nil {
+						log.Printf("Error flushing Cloud Logging: %v", err)
+					}
+				}
+			case <-flushStop:
+				flushTicker.Stop()
+				return
+			}
+		}
+	}()
+}
+
+// StopPeriodicFlush stops the periodic flush goroutine
+func StopPeriodicFlush() {
+	if flushStop != nil {
+		close(flushStop)
+	}
 }
 
 // IsEnabled returns whether Cloud Logging is active

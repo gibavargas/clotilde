@@ -11,12 +11,13 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Features
 
 - 🚗 CarPlay integration via Apple Shortcuts
-- 🧠 GPT-5 with web browsing for real-time information
+- 🧠 OpenAI Responses API with web search for real-time information
 - 🇧🇷 Brazilian Portuguese responses (default)
 - 🔒 Security-first design with API key authentication, rate limiting, and input validation
 - 💰 Free tier optimized (Google Cloud Artifact Registry + Cloud Run)
 - 🐳 Minimal Docker image (~10-15MB)
 - 📊 Admin dashboard for monitoring logs and usage statistics
+- ⚙️ **Dynamic configuration**: Change system prompt and models without redeployment
 - 🔍 Request tracing with unique request IDs
 
 ## Architecture
@@ -268,7 +269,7 @@ X-API-Key: your-api-key
 
 ## Admin Dashboard
 
-The admin dashboard provides a web-based interface for monitoring and configuring your Clotilde instance.
+The admin dashboard provides a web-based interface for monitoring your Clotilde instance.
 
 ### Features
 
@@ -276,7 +277,6 @@ The admin dashboard provides a web-based interface for monitoring and configurin
 - **Usage Statistics**: Total requests, average response time, error rate, model usage distribution
 - **Real-time Updates**: Auto-refresh every 10 seconds (configurable)
 - **Request Tracing**: Each request gets a unique ID (`X-Request-ID` header) for debugging
-- **Runtime Configuration**: Change system prompt and model selection without redeployment
 
 ### Setup
 
@@ -298,19 +298,18 @@ The admin dashboard provides a web-based interface for monitoring and configurin
 | `GET /admin/logs` | JSON API for log entries (supports pagination and filtering) |
 | `GET /admin/stats` | JSON API for aggregated statistics |
 | `GET /admin/config` | Get current runtime configuration (system prompt, models) |
-| `POST /admin/config` | Update runtime configuration (requires JSON body) |
+| `POST /admin/config` | Update runtime configuration without redeployment |
 | `GET /health` | Enhanced health check with uptime, request count, and memory usage |
 
 ### Runtime Configuration
 
-The admin dashboard allows you to change the system prompt and model selection at runtime without redeploying:
+The admin dashboard allows you to change configuration without redeploying:
 
-1. **System Prompt**: Edit the prompt template in the settings card. Use `%s` as a placeholder for the current date/time.
-2. **Model Selection**: Choose from available OpenAI models:
-   - **Standard Models** (fast/cheap): `gpt-4.1-nano`, `gpt-4.1-mini`, `gpt-4o-mini`, `gpt-3.5-turbo`
-   - **Premium Models** (powerful): `gpt-4.1`, `gpt-4o`, `o4-mini`, `o3`, `gpt-5.1`, and more
+- **System Prompt**: Edit the AI's personality and behavior instructions
+- **Standard Model**: Select the model for simple queries (e.g., `gpt-4o-mini`, `gpt-4.1-mini`)
+- **Premium Model**: Select the model for complex queries (e.g., `gpt-4.1`, `o3`)
 
-**Note**: Configuration changes are in-memory and will reset to defaults if the Cloud Run instance restarts. Changes apply immediately to all new requests.
+Changes take effect immediately for all new requests.
 
 ### Security
 
@@ -360,7 +359,13 @@ See [SECURITY.md](SECURITY.md) for detailed security documentation.
 - Default: 10 requests/minute, 100 requests/hour
 - Adjust in `internal/ratelimit/ratelimit.go` if needed
 
+## Documentation
+
+- [SECURITY.md](SECURITY.md) - Security documentation and best practices
+- [agents.md](agents.md) - AI agent documentation for code maintainers (critical code paths, common issues)
+- [LOCAL_DOCKER.md](LOCAL_DOCKER.md) - Local Docker development guide
+
 ## License
 
-Private project - All rights reserved
+MIT License - See [LICENSE](LICENSE) file for details
 

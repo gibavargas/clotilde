@@ -733,6 +733,9 @@ const dashboardHTML = `<!DOCTYPE html>
     </div>
 
     <script>
+        // CSRF token for protecting state-changing requests
+        const csrfToken = '{{CSRF_TOKEN}}';
+        
         let currentOffset = 0;
         const limit = 50;
         let totalEntries = 0;
@@ -854,11 +857,12 @@ const dashboardHTML = `<!DOCTYPE html>
             entries.forEach((entry, index) => {
                 const isExpanded = expandedRows.has(entry.id);
                 const hasContent = entry.input || entry.output;
+                const safeId = escapeHtml(entry.id);
                 
                 html += ` + "`" + `
-                    <tr class="${isExpanded ? 'expanded' : ''}" data-id="${entry.id}">
+                    <tr class="${isExpanded ? 'expanded' : ''}" data-id="${safeId}">
                         <td>${formatTime(entry.timestamp)}</td>
-                        <td class="request-id">${entry.id}</td>
+                        <td class="request-id">${safeId}</td>
                         <td>
                             <span class="badge ${entry.model && entry.model.includes('mini') ? 'badge-nano' : 'badge-full'}">
                                 ${entry.model && entry.model.includes('mini') ? 'Mini' : 'Full'}
@@ -873,13 +877,13 @@ const dashboardHTML = `<!DOCTYPE html>
                         </td>
                         <td>
                             ${hasContent ? ` + "`" + `
-                                <button class="expand-btn ${isExpanded ? 'active' : ''}" onclick="toggleDetails('${entry.id}')">
+                                <button class="expand-btn ${isExpanded ? 'active' : ''}" onclick="toggleDetails('${safeId.replace(/'/g, "\\'")}')">
                                     ${isExpanded ? '▼ Hide' : '▶ View'}
                                 </button>
                             ` + "`" + ` : '<span style="color: var(--text-secondary); font-size: 11px;">No data</span>'}
                         </td>
                     </tr>
-                    <tr class="detail-row ${isExpanded ? 'visible' : ''}" id="detail-${entry.id}">
+                    <tr class="detail-row ${isExpanded ? 'visible' : ''}" id="detail-${safeId}">
                         <td colspan="6" class="detail-cell">
                             <div class="detail-content">
                                 ${entry.input ? ` + "`" + `
@@ -1026,7 +1030,8 @@ const dashboardHTML = `<!DOCTYPE html>
                 const response = await fetch('/admin/config', {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        'X-CSRF-Token': csrfToken
                     },
                     body: JSON.stringify(config)
                 });

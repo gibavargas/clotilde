@@ -97,7 +97,7 @@ func (l *Logger) Add(entry LogEntry) {
 	}
 
 	// Track model usage
-	if entry.Model == "gpt-5-nano-2025-08-07" {
+	if entry.Model == "gpt-4o-mini" {
 		l.nanoCount++
 	} else {
 		l.fullCount++
