@@ -121,7 +121,7 @@ type ReasoningConfig struct {
 
 // WebSearchTool represents the web_search tool configuration
 type WebSearchTool struct {
-	Type string `json:"type"` // "web_search"
+	Type string `json:"type"` // "web_search" or "web_search_preview" depending on API version
 }
 
 // ResponsesAPIResponse represents the response from Responses API
@@ -508,10 +508,12 @@ func (s *Server) createResponse(ctx context.Context, route RouteDecision, instru
 	}
 
 	// Only enable web_search when needed (costs extra)
+	// All models that support Responses API support web_search tool
 	if route.WebSearch {
+		// Use web_search tool - supported by all Responses API models
 		webSearchTool := WebSearchTool{Type: "web_search"}
 		reqBody.Tools = []interface{}{webSearchTool}
-		log.Printf("Web search enabled for this request")
+		log.Printf("[%s] Web search enabled for model: %s", route.Model, route.Model)
 	}
 
 	// Set reasoning effort only for models that support it (o1, o3, gpt-5 series)
