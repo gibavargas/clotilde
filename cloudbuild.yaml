@@ -44,7 +44,7 @@ steps:
       - '--set-env-vars'
       - 'GOOGLE_CLOUD_PROJECT=${PROJECT_ID},ADMIN_USER=${_ADMIN_USER},LOG_BUFFER_SIZE=${_LOG_BUFFER_SIZE}'
       - '--set-secrets'
-      - 'OPENAI_KEY_SECRET_NAME=${_OPENAI_SECRET}:latest,API_KEY_SECRET_NAME=${_API_SECRET}:latest,ADMIN_PASSWORD=${_ADMIN_SECRET}:latest'
+      - 'OPENAI_KEY_SECRET_NAME=${_OPENAI_SECRET}:latest,API_KEY_SECRET_NAME=${_API_SECRET}:latest'
     id: 'deploy-cloud-run'
     waitFor: ['push-image']
 
