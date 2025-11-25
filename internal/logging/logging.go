@@ -162,6 +162,11 @@ func (l *Logger) GetEntriesFiltered(limit, offset int, model, status string, sta
 		idx := (startIdx - i + l.capacity) % l.capacity
 		entry := l.entries[idx]
 		
+		// Skip entries with zero timestamp (empty slots in ring buffer)
+		if entry.Timestamp.IsZero() {
+			continue
+		}
+		
 		// Apply filters
 		if model != "" && entry.Model != model {
 			continue
@@ -213,6 +218,10 @@ func (l *Logger) GetStats() Stats {
 	for i := 0; i < l.count; i++ {
 		idx := (l.head - 1 - i + l.capacity) % l.capacity
 		entry := l.entries[idx]
+		// Skip entries with zero timestamp (empty slots in ring buffer)
+		if entry.Timestamp.IsZero() {
+			continue
+		}
 		if entry.Timestamp.After(todayStart) {
 			stats.TotalRequestsToday++
 		}
@@ -224,11 +233,16 @@ func (l *Logger) GetStats() Stats {
 		stats.ErrorRate = float64(l.errorCount) / float64(l.totalCount) * 100
 	}
 
-	// Get last request time
+	// Get last request time (find most recent valid entry)
 	if l.count > 0 {
-		lastIdx := (l.head - 1 + l.capacity) % l.capacity
-		lastTime := l.entries[lastIdx].Timestamp
-		stats.LastRequestTime = &lastTime
+		for i := 0; i < l.count; i++ {
+			idx := (l.head - 1 - i + l.capacity) % l.capacity
+			entry := l.entries[idx]
+			if !entry.Timestamp.IsZero() {
+				stats.LastRequestTime = &entry.Timestamp
+				break
+			}
+		}
 	}
 
 	return stats

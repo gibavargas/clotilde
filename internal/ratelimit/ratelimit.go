@@ -129,18 +129,55 @@ func Middleware() func(http.Handler) http.Handler {
 
 func getClientIP(r *http.Request) string {
 	// Check X-Forwarded-For header (Cloud Run sets this)
+	// Extract first IP only to prevent header spoofing bypass
 	forwarded := r.Header.Get("X-Forwarded-For")
 	if forwarded != "" {
+		// Take only the first IP (original client)
+		// X-Forwarded-For can contain: "client, proxy1, proxy2"
+		if idx := strings.Index(forwarded, ","); idx != -1 {
+			forwarded = strings.TrimSpace(forwarded[:idx])
+		} else {
+			forwarded = strings.TrimSpace(forwarded)
+		}
+		// Remove port if present (e.g., "192.168.1.1:12345" -> "192.168.1.1")
+		// Handle IPv6 addresses with brackets (e.g., "[::1]:12345" -> "[::1]")
+		if strings.HasPrefix(forwarded, "[") {
+			// IPv6 with brackets
+			if idx := strings.Index(forwarded, "]:"); idx != -1 {
+				forwarded = forwarded[:idx+1]
+			}
+		} else {
+			// IPv4 or IPv6 without brackets
+			if idx := strings.Index(forwarded, ":"); idx != -1 {
+				forwarded = forwarded[:idx]
+			}
+		}
 		return forwarded
 	}
 
 	// Check X-Real-IP header
 	realIP := r.Header.Get("X-Real-IP")
 	if realIP != "" {
-		return realIP
+		// Remove port if present
+		if idx := strings.Index(realIP, ":"); idx != -1 {
+			realIP = realIP[:idx]
+		}
+		return strings.TrimSpace(realIP)
 	}
 
-	// Fallback to RemoteAddr
-	return r.RemoteAddr
+	// Fallback to RemoteAddr (format: "IP:port" or "[IPv6]:port")
+	remoteAddr := r.RemoteAddr
+	if strings.HasPrefix(remoteAddr, "[") {
+		// IPv6 with brackets
+		if idx := strings.Index(remoteAddr, "]:"); idx != -1 {
+			remoteAddr = remoteAddr[:idx+1]
+		}
+	} else {
+		// IPv4 or IPv6 without brackets
+		if idx := strings.Index(remoteAddr, ":"); idx != -1 {
+			remoteAddr = remoteAddr[:idx]
+		}
+	}
+	return remoteAddr
 }
 

@@ -1,7 +1,11 @@
 package admin
 
 import (
+	"bytes"
+	"fmt"
+	"strings"
 	"sync"
+	"unicode/utf8"
 )
 
 // RuntimeConfig holds runtime configuration that can be changed via admin UI
@@ -45,6 +49,44 @@ func GetConfig() RuntimeConfig {
 	}
 }
 
+// validateSystemPrompt validates the system prompt content
+func validateSystemPrompt(prompt string) error {
+	// Check for null bytes (security risk)
+	if bytes.Contains([]byte(prompt), []byte{0}) {
+		return &ConfigError{Field: "system_prompt", Message: "System prompt contains null bytes"}
+	}
+	
+	// Check if valid UTF-8
+	if !utf8.ValidString(prompt) {
+		return &ConfigError{Field: "system_prompt", Message: "System prompt contains invalid UTF-8"}
+	}
+	
+	// Validate format string placeholder - must contain exactly one %s
+	placeholderCount := strings.Count(prompt, "%s")
+	if placeholderCount == 0 {
+		return &ConfigError{Field: "system_prompt", Message: "System prompt must contain exactly one %s placeholder for date/time"}
+	}
+	if placeholderCount > 1 {
+		return &ConfigError{Field: "system_prompt", Message: fmt.Sprintf("System prompt must contain exactly one %s placeholder (found %d)", placeholderCount)}
+	}
+	
+	// Check for potentially dangerous format strings (but allow %s)
+	// Count % that aren't part of %s
+	dangerousPatterns := []string{"%d", "%f", "%v", "%+v", "%#v", "%x", "%X", "%p"}
+	for _, pattern := range dangerousPatterns {
+		if strings.Contains(prompt, pattern) {
+			return &ConfigError{Field: "system_prompt", Message: fmt.Sprintf("System prompt contains unsupported format specifier: %s", pattern)}
+		}
+	}
+	
+	// Check for escaped %s (%%s) - this would break the template
+	if strings.Contains(prompt, "%%s") {
+		return &ConfigError{Field: "system_prompt", Message: "System prompt contains escaped placeholder (%%s)"}
+	}
+	
+	return nil
+}
+
 // SetConfig updates the runtime configuration
 // Returns error if validation fails
 func SetConfig(newConfig RuntimeConfig) error {
@@ -83,6 +125,11 @@ func SetConfig(newConfig RuntimeConfig) error {
 	
 	if !validModels[newConfig.PremiumModel] {
 		return &ConfigError{Field: "premium_model", Message: "Invalid premium model"}
+	}
+	
+	// Validate system prompt content
+	if err := validateSystemPrompt(newConfig.SystemPrompt); err != nil {
+		return err
 	}
 	
 	configMutex.Lock()

@@ -247,10 +247,10 @@ func main() {
 	// 2. Validator: Limits request size early (prevents large payloads)
 	// 3. Auth: Validates API key before rate limiting
 	// 4. Ratelimit: Only rate-limits authenticated requests (by API key)
-	handler := ratelimit.Middleware()(mux)
-	handler = auth.Middleware(apiKeySecret)(handler)
+	handler := logging.RequestIDMiddleware(mux)
 	handler = validator.Middleware()(handler)
-	handler = logging.RequestIDMiddleware(handler)
+	handler = auth.Middleware(apiKeySecret)(handler)
+	handler = ratelimit.Middleware()(handler)
 
 	serverAddr := fmt.Sprintf(":%s", port)
 
@@ -391,9 +391,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[%s] Request received: IP=%s, MessageLength=%d", requestID, hashIP(r.RemoteAddr), len(req.Message))
 
 	// Route to appropriate model and determine if web search is needed
-	routerCtx, routerCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	route := s.routeToModel(routerCtx, req.Message)
-	routerCancel()
+	route := s.routeToModel(req.Message)
 	log.Printf("[%s] Route decision: Model=%s, WebSearch=%v", requestID, route.Model, route.WebSearch)
 
 	// Call OpenAI with selected model and tools
@@ -669,13 +667,13 @@ func (s *Server) createResponse(ctx context.Context, route RouteDecision, instru
 // According to OpenAI docs: "Web search is currently not supported in gpt-5 with minimal reasoning, and gpt-4.1-nano"
 // gpt-5-mini and gpt-5-nano are cheap variants that may not support web search
 var modelsWithWebSearch = map[string]bool{
-	"gpt-4o":             true,
-	"gpt-4o-mini":        true,
-	"gpt-4o-2024-08-06":  true,
-	"chatgpt-4o-latest":  true,
-	"gpt-4-turbo":        true,
-	"gpt-4.1":            true,
-	"gpt-4.1-mini":       true,
+	"gpt-4o":            true,
+	"gpt-4o-mini":       true,
+	"gpt-4o-2024-08-06": true,
+	"chatgpt-4o-latest": true,
+	"gpt-4-turbo":       true,
+	"gpt-4.1":           true,
+	"gpt-4.1-mini":      true,
 	// gpt-4.1-nano does NOT support web search
 	// gpt-5 series needs reasoning >= "low" for web search
 	"gpt-5":     true, // with reasoning
@@ -703,7 +701,7 @@ func containsAny(text string, keywords []string) bool {
 
 // routeToModel determines which model and tools to use based on question type
 // Uses CODE-BASED routing (no LLM calls) for cost efficiency
-func (s *Server) routeToModel(ctx context.Context, question string) RouteDecision {
+func (s *Server) routeToModel(question string) RouteDecision {
 	// Get dynamic model configuration
 	config := admin.GetConfig()
 	standardModel := config.StandardModel
