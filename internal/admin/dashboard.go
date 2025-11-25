@@ -471,6 +471,128 @@ const dashboardHTML = `<!DOCTYPE html>
                 display: block;
                 overflow-x: auto;
             }
+
+            .grid-row {
+                grid-template-columns: 1fr !important;
+            }
+        }
+
+        /* Settings Styles */
+        .settings-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 32px;
+        }
+
+        .settings-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 24px;
+        }
+
+        .settings-title {
+            font-size: 18px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+
+        .form-control {
+            width: 100%;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 10px 12px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: var(--font-sans);
+            transition: border-color 0.2s;
+        }
+
+        .form-control:focus {
+            outline: none;
+            border-color: var(--accent-cyan);
+            box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.15);
+        }
+
+        .textarea-editor {
+            font-family: var(--font-mono);
+            min-height: 200px;
+            resize: vertical;
+            line-height: 1.6;
+        }
+
+        .save-btn {
+            background: var(--accent-green);
+            color: #fff;
+            border: none;
+            padding: 10px 24px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: opacity 0.2s;
+        }
+
+        .save-btn:hover {
+            opacity: 0.9;
+        }
+
+        .save-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            padding: 12px 24px;
+            border-radius: 8px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            font-size: 14px;
+            transform: translateY(100px);
+            opacity: 0;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+
+        .toast.show {
+            transform: translateY(0);
+            opacity: 1;
+        }
+
+        .toast-success {
+            border-left: 4px solid var(--accent-green);
+        }
+
+        .toast-error {
+            border-left: 4px solid var(--accent-red);
         }
     </style>
 </head>
@@ -522,6 +644,53 @@ const dashboardHTML = `<!DOCTYPE html>
             </div>
         </div>
 
+        <div class="settings-card">
+            <div class="settings-header">
+                <div class="settings-title">
+                    ⚙️ Configuration
+                </div>
+                <button class="save-btn" id="saveConfigBtn" onclick="saveConfig()">
+                    <span class="btn-text">Save Changes</span>
+                    <div class="spinner" style="width: 16px; height: 16px; border-width: 2px; display: none;"></div>
+                </button>
+            </div>
+
+            <div class="grid-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px;">
+                <div class="form-group">
+                    <label class="form-label">Standard Model (Simple/Fast)</label>
+                    <select class="form-control" id="standardModel">
+                        <option value="gpt-4.1-nano">gpt-4.1-nano (Cheapest)</option>
+                        <option value="gpt-4.1-mini">gpt-4.1-mini (Balanced)</option>
+                        <option value="gpt-4o-mini">gpt-4o-mini (Legacy)</option>
+                        <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Premium Model (Complex/Deep)</label>
+                    <select class="form-control" id="premiumModel">
+                        <option value="gpt-4.1">gpt-4.1 (Recommended)</option>
+                        <option value="gpt-4o">gpt-4o</option>
+                        <option value="gpt-4o-2024-08-06">gpt-4o-2024-08-06</option>
+                        <option value="chatgpt-4o-latest">chatgpt-4o-latest</option>
+                        <option value="gpt-4-turbo">gpt-4-turbo</option>
+                        <option value="o4-mini">o4-mini (Reasoning)</option>
+                        <option value="o3">o3 (Advanced Reasoning)</option>
+                        <option value="gpt-5.1">gpt-5.1 (Preview)</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">System Prompt Template</label>
+                <textarea class="form-control textarea-editor" id="systemPrompt" spellcheck="false"></textarea>
+                <div class="stat-subtitle" style="margin-top: 8px;">
+                    Use <code>%s</code> as a placeholder for the current date/time.
+                </div>
+            </div>
+        </div>
+
+        <div id="toast" class="toast"></div>
+
         <div class="section">
             <div class="section-header">
                 <div class="section-title">
@@ -530,8 +699,8 @@ const dashboardHTML = `<!DOCTYPE html>
                 <div class="filters">
                     <select id="filterModel">
                         <option value="">All Models</option>
-                        <option value="gpt-5-nano-2025-08-07">Nano</option>
-                        <option value="gpt-5.1-2025-11-13">Full</option>
+                        <option value="gpt-4o-mini">Mini (cheap)</option>
+                        <option value="gpt-5.1">Full (gpt-5.1)</option>
                     </select>
                     <select id="filterStatus">
                         <option value="">All Status</option>
@@ -574,6 +743,7 @@ const dashboardHTML = `<!DOCTYPE html>
         document.addEventListener('DOMContentLoaded', () => {
             loadStats();
             loadLogs();
+            loadConfig();
             setupAutoRefresh();
         });
 
@@ -690,8 +860,8 @@ const dashboardHTML = `<!DOCTYPE html>
                         <td>${formatTime(entry.timestamp)}</td>
                         <td class="request-id">${entry.id}</td>
                         <td>
-                            <span class="badge ${entry.model && entry.model.includes('nano') ? 'badge-nano' : 'badge-full'}">
-                                ${entry.model && entry.model.includes('nano') ? 'Nano' : 'Full'}
+                            <span class="badge ${entry.model && entry.model.includes('mini') ? 'badge-nano' : 'badge-full'}">
+                                ${entry.model && entry.model.includes('mini') ? 'Mini' : 'Full'}
                             </span>
                         </td>
                         <td>${entry.response_time_ms}ms</td>
@@ -811,6 +981,78 @@ const dashboardHTML = `<!DOCTYPE html>
             currentOffset = 0;
             expandedRows.clear();
             loadLogs();
+        }
+
+        // Config Management
+        async function loadConfig() {
+            try {
+                const response = await fetch('/admin/config');
+                if (!response.ok) throw new Error('Failed to load config');
+                
+                const config = await response.json();
+                
+                if (config.system_prompt) {
+                    document.getElementById('systemPrompt').value = config.system_prompt;
+                }
+                if (config.standard_model) {
+                    document.getElementById('standardModel').value = config.standard_model;
+                }
+                if (config.premium_model) {
+                    document.getElementById('premiumModel').value = config.premium_model;
+                }
+            } catch (error) {
+                console.error('Error loading config:', error);
+                // Don't show error toast on load to avoid annoyance if backend isn't ready
+            }
+        }
+
+        async function saveConfig() {
+            const btn = document.getElementById('saveConfigBtn');
+            const btnText = btn.querySelector('.btn-text');
+            const spinner = btn.querySelector('.spinner');
+            
+            // Lock UI
+            btn.disabled = true;
+            btnText.style.display = 'none';
+            spinner.style.display = 'block';
+            
+            const config = {
+                system_prompt: document.getElementById('systemPrompt').value,
+                standard_model: document.getElementById('standardModel').value,
+                premium_model: document.getElementById('premiumModel').value
+            };
+            
+            try {
+                const response = await fetch('/admin/config', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(config)
+                });
+                
+                if (!response.ok) throw new Error('Failed to save config');
+                
+                showToast('Configuration saved successfully', 'success');
+            } catch (error) {
+                console.error('Error saving config:', error);
+                showToast('Failed to save configuration', 'error');
+            } finally {
+                // Unlock UI
+                btn.disabled = false;
+                btnText.style.display = 'block';
+                spinner.style.display = 'none';
+            }
+        }
+
+        function showToast(message, type) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = 'toast toast-' + type + ' show';
+            
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
         }
     </script>
 </body>

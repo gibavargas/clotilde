@@ -9,8 +9,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	secretmanager "cloud.google.com/go/secretmanager/apiv1"
@@ -32,9 +34,11 @@ const (
 Current date and time: %s (Brazil/São Paulo timezone)
 
 Constraints and safety:
-- I'm listening to your responses, so length is not a concern. Provide complete, detailed answers when appropriate.
+- I'm listening to your responses, so response length should be at most 60 seconds of talking. Provide complete, detailed answers when appropriate.
 - Never show code blocks or markdown; respond as plain text only.
+- CRITICAL: NEVER mention URLs, website addresses, or links in your responses. Since responses are spoken aloud, URLs are useless and annoying. Instead, just mention the source name (e.g., "G1", "BBC", "Reuters") without any web addresses.
 - CRITICAL: NEVER ask questions to the user. This is a single-turn conversation with no follow-up. Always provide the best answer you can with the information available, even if incomplete. If information is missing, state what you know and acknowledge limitations, but do not ask for clarification.
+- CRITICAL: ABSOLUTELY FORBIDDEN to include any URLs, web addresses, or links. Do NOT mention "www", "http", "https", ".com", ".br", or any domain names. Do NOT say things like "você pode ver em..." or "acesse...". Only mention source names (e.g., "Segundo o G1" or "De acordo com a Reuters"). If you catch yourself about to mention a URL, stop immediately and rephrase without it.
 
 Web search behavior:
 - You have access to web search capabilities that return results from the public web.
@@ -55,21 +59,34 @@ Style and personality:
 
 Output format:
 - Always answer in Brazilian Portuguese unless I clearly use another language.
+- CRITICAL: Your response MUST be at most TWO paragraphs. Be concise and focused. If you need to cover multiple points, prioritize the most important information and condense it into two paragraphs maximum.
 - Provide complete, detailed answers with specific facts, dates, times, and concrete information.
 - When citing sources, include the publication name and, when available, the specific time/date of the information.
 - Do not include your name or meta‑comments unless I ask; stay in character as Clotilde.
 - NEVER end with a question or ask for more information.
 - NEVER include disclaimers about information being approximate, time-sensitive, or subject to change unless it's genuinely relevant context (e.g., "a cotação pode variar durante o pregão" is fine, but "notícias podem mudar a qualquer momento" is not).`
 
-	routerPrompt = `Classify this question as "simple" or "complex".
+	routerPrompt = `Classify this question into ONE category based on TWO factors:
+1. Does it need CURRENT/REAL-TIME info? (news, prices, weather, today's events)
+2. Does it need DEEP ANALYSIS? (comparisons, reasoning, detailed explanations)
 
-SIMPLE (use nano): Basic facts, greetings, simple definitions, straightforward questions that can be answered easily with factual information.
-COMPLEX (use full): Analysis, comparisons, explanations, multi-step reasoning, creative tasks, nuanced topics, questions that require more than a few sentences to answer.
+Categories:
+- SIMPLE: No current info needed, no deep analysis (greetings, basic facts, definitions)
+- SEARCH: Needs current info, but simple answer (today's weather, current price, latest news)
+- COMPLEX: Needs deep analysis, but NO current info (explain a concept, analyze a book, creative writing)
+- BOTH: Needs current info AND deep analysis (analyze today's market trends, compare recent events)
 
-Answer ONLY with one word: "simple" or "complex"
+Answer with ONLY one word: "simple", "search", "complex", or "both"
 
 Question: %s`
 )
+
+// RouteDecision contains routing information for a request
+type RouteDecision struct {
+	Model           string
+	WebSearch       bool
+	ReasoningEffort string // "none", "low", "medium", "high" - empty means no reasoning config
+}
 
 type ChatRequest struct {
 	Message string `json:"message"`
@@ -89,11 +106,17 @@ type Server struct {
 
 // ResponsesAPIRequest represents the request body for Responses API
 type ResponsesAPIRequest struct {
-	Model        string        `json:"model"`
-	Input        interface{}   `json:"input"` // Can be string or []map[string]interface{}
-	Instructions string        `json:"instructions,omitempty"`
-	Store        *bool         `json:"store,omitempty"`
-	Tools        []interface{} `json:"tools,omitempty"` // Tools like web_search
+	Model        string           `json:"model"`
+	Input        interface{}      `json:"input"` // Can be string or []map[string]interface{}
+	Instructions string           `json:"instructions,omitempty"`
+	Store        *bool            `json:"store,omitempty"`
+	Tools        []interface{}    `json:"tools,omitempty"` // Tools like web_search
+	Reasoning    *ReasoningConfig `json:"reasoning,omitempty"`
+}
+
+// ReasoningConfig controls reasoning behavior for models that support it
+type ReasoningConfig struct {
+	Effort string `json:"effort"` // "none", "low", "medium", "high"
 }
 
 // WebSearchTool represents the web_search tool configuration
@@ -195,6 +218,9 @@ func main() {
 		log.Printf("Admin dashboard disabled (ADMIN_USER and ADMIN_PASSWORD not set)")
 	}
 
+	// Initialize default runtime configuration with the system prompt template
+	admin.SetDefaultConfig(clotildeSystemPromptTemplate)
+
 	// Middleware order (outer to inner): requestID → validator → auth → ratelimit
 	// 1. RequestID: Adds unique request ID for tracing
 	// 2. Validator: Limits request size early (prevents large payloads)
@@ -206,10 +232,57 @@ func main() {
 	handler = logging.RequestIDMiddleware(handler)
 
 	serverAddr := fmt.Sprintf(":%s", port)
-	log.Printf("Server starting on %s", serverAddr)
-	if err := http.ListenAndServe(serverAddr, handler); err != nil {
-		log.Fatalf("Server failed: %v", err)
+	
+	// Create HTTP server with graceful shutdown
+	srv := &http.Server{
+		Addr:    serverAddr,
+		Handler: handler,
 	}
+
+	// Setup graceful shutdown
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+
+	// Start server in goroutine
+	go func() {
+		log.Printf("Server starting on %s", serverAddr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server failed: %v", err)
+		}
+	}()
+
+	// Wait for interrupt signal
+	<-quit
+	log.Println("Shutting down server...")
+
+	// Flush Cloud Logging before shutdown
+	cloudLogger := logging.GetCloudLogger()
+	if cloudLogger.IsEnabled() {
+		log.Println("Flushing Cloud Logging...")
+		if err := cloudLogger.Flush(); err != nil {
+			log.Printf("Error flushing Cloud Logging: %v", err)
+		}
+		// Give it a moment to send
+		time.Sleep(2 * time.Second)
+	}
+	logging.StopPeriodicFlush()
+
+	// Graceful shutdown with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatalf("Server forced to shutdown: %v", err)
+	}
+
+	// Close Cloud Logging client
+	if cloudLogger.IsEnabled() {
+		if err := cloudLogger.Close(); err != nil {
+			log.Printf("Error closing Cloud Logging client: %v", err)
+		}
+	}
+
+	log.Println("Server exited")
 }
 
 func getSecret(ctx context.Context, client *secretmanager.Client, projectID, secretName string) (string, error) {
@@ -296,26 +369,27 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	// Log request metadata (no sensitive data)
 	log.Printf("[%s] Request received: IP=%s, MessageLength=%d", requestID, hashIP(r.RemoteAddr), len(req.Message))
 
-	// Route to appropriate model based on question complexity
+	// Route to appropriate model and determine if web search is needed
 	routerCtx, routerCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	model := s.routeToModel(routerCtx, req.Message)
+	route := s.routeToModel(routerCtx, req.Message)
 	routerCancel()
-	log.Printf("[%s] Selected model: %s", requestID, model)
+	log.Printf("[%s] Route decision: Model=%s, WebSearch=%v", requestID, route.Model, route.WebSearch)
 
-	// Call OpenAI with selected model
+	// Call OpenAI with selected model and tools
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second) // Increased timeout for web search
 	defer cancel()
 
 	// Get current date/time in Brazil timezone for context
 	currentTime := getCurrentBrazilTime()
-	systemPrompt := fmt.Sprintf(clotildeSystemPromptTemplate, currentTime)
+	// Get dynamic system prompt from runtime config
+	config := admin.GetConfig()
+	systemPrompt := fmt.Sprintf(config.SystemPrompt, currentTime)
 
 	// Use Responses API instead of Chat Completions
-	// Responses API has native web_search support and better performance
-	response, err := s.createResponse(ctx, model, systemPrompt, req.Message)
+	response, err := s.createResponse(ctx, route, systemPrompt, req.Message)
 	if err != nil {
 		log.Printf("[%s] OpenAI Responses API error: %v", requestID, err)
-		s.logRequest(requestID, r, req.Message, "", model, time.Since(startTime), "error", err.Error())
+		s.logRequest(requestID, r, req.Message, "", route.Model, time.Since(startTime), "error", err.Error())
 		respondError(w, "Failed to get response from AI", http.StatusInternalServerError)
 		return
 	}
@@ -327,7 +401,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	// Log successful request
 	responseTime := time.Since(startTime)
 	log.Printf("[%s] Response generated: Length=%d, Time=%v", requestID, len(response), responseTime)
-	s.logRequest(requestID, r, req.Message, response, model, responseTime, "success", "")
+	s.logRequest(requestID, r, req.Message, response, route.Model, responseTime, "success", "")
 
 	respondSuccess(w, response)
 }
@@ -422,19 +496,28 @@ func getCurrentBrazilTime() string {
 
 // createResponse calls the OpenAI Responses API
 // The Responses API has native web_search support and handles tool calls automatically
-func (s *Server) createResponse(ctx context.Context, model, instructions, input string) (string, error) {
+func (s *Server) createResponse(ctx context.Context, route RouteDecision, instructions, input string) (string, error) {
 	// Build request body for Responses API
 	store := false // Don't store state for single-turn conversations
 
-	// Enable web_search tool for real-time information
-	webSearchTool := WebSearchTool{Type: "web_search"}
-
 	reqBody := ResponsesAPIRequest{
-		Model:        model,
+		Model:        route.Model,
 		Input:        input, // Can be string or messages array
 		Instructions: instructions,
 		Store:        &store,
-		Tools:        []interface{}{webSearchTool}, // Enable web search
+	}
+
+	// Only enable web_search when needed (costs extra)
+	if route.WebSearch {
+		webSearchTool := WebSearchTool{Type: "web_search"}
+		reqBody.Tools = []interface{}{webSearchTool}
+		log.Printf("Web search enabled for this request")
+	}
+
+	// Set reasoning effort for models that support it (gpt-5.1)
+	if route.ReasoningEffort != "" {
+		reqBody.Reasoning = &ReasoningConfig{Effort: route.ReasoningEffort}
+		log.Printf("Reasoning effort: %s", route.ReasoningEffort)
 	}
 
 	jsonData, err := json.Marshal(reqBody)
@@ -519,46 +602,92 @@ func (s *Server) createResponse(ctx context.Context, model, instructions, input 
 	return "", fmt.Errorf("empty response from API")
 }
 
-// routeToModel determines which model to use based on question complexity
-func (s *Server) routeToModel(ctx context.Context, question string) string {
-	// Use GPT-5 nano to classify the question
+// routeToModel determines which model and tools to use based on question type
+// Cost optimization: uses cheaper models and only enables web search when needed
+func (s *Server) routeToModel(ctx context.Context, question string) RouteDecision {
+	// Get dynamic model configuration
+	config := admin.GetConfig()
+	standardModel := config.StandardModel
+	premiumModel := config.PremiumModel
+
+	// Use standard model for routing (very cheap)
 	routerCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	routerResp, err := s.openaiClient.CreateChatCompletion(routerCtx, openai.ChatCompletionRequest{
-		Model: "gpt-5-nano-2025-08-07",
+		Model: standardModel,
 		Messages: []openai.ChatCompletionMessage{
 			{
 				Role:    openai.ChatMessageRoleUser,
 				Content: fmt.Sprintf(routerPrompt, question),
 			},
 		},
-		// No MaxTokens needed - router prompt explicitly asks for one word only
-		Temperature: 0.0, // Zero temperature for deterministic classification
+		MaxTokens:   5, // Only need one word
+		Temperature: 0.0,
 	})
 
+	// Default: use standard model without web search
+	defaultDecision := RouteDecision{
+		Model:     standardModel,
+		WebSearch: false,
+	}
+
 	if err != nil {
-		log.Printf("Router error, defaulting to full model: %v", err)
-		return "gpt-5.1-2025-11-13"
+		log.Printf("Router error, using default: %v", err)
+		return defaultDecision
 	}
 
 	if len(routerResp.Choices) == 0 {
-		log.Printf("Router returned no choices, defaulting to full model")
-		return "gpt-5.1-2025-11-13"
+		log.Printf("Router returned no choices, using default")
+		return defaultDecision
 	}
 
 	decision := strings.ToLower(strings.TrimSpace(routerResp.Choices[0].Message.Content))
 	log.Printf("Router decision: %s", decision)
 
-	// Route to nano for simple questions, full for complex
+	// SIMPLE: Use standard model, no web search (cheapest)
 	if strings.Contains(decision, "simple") {
-		return "gpt-5-nano-2025-08-07"
+		return RouteDecision{
+			Model:           standardModel,
+			WebSearch:       false,
+			ReasoningEffort: "", // Standard models don't have reasoning
+		}
 	}
 
-	// Default to full model for complex questions or if unclear
-	return "gpt-5.1-2025-11-13"
+	// SEARCH: Use standard model with web search (medium cost - simple + current data)
+	if strings.Contains(decision, "search") {
+		return RouteDecision{
+			Model:           standardModel,
+			WebSearch:       true,
+			ReasoningEffort: "", // Standard models don't have reasoning
+		}
+	}
+
+	// BOTH: Use premium model WITH web search (premium - complex + current data)
+	if strings.Contains(decision, "both") {
+		return RouteDecision{
+			Model:           premiumModel,
+			WebSearch:       true,
+			ReasoningEffort: "none", // Disable reasoning to save cost
+		}
+	}
+
+	// COMPLEX: Use premium model without web search (premium - complex, no current data)
+	if strings.Contains(decision, "complex") {
+		return RouteDecision{
+			Model:           premiumModel,
+			WebSearch:       false,
+			ReasoningEffort: "none", // Disable reasoning to save cost
+		}
+	}
+
+	// Default to standard model
+	return defaultDecision
 }
 
-// Note: Web search is now handled natively by OpenAI's API
-// The model gpt-5.1-2025-11-13 has built-in web search capabilities
-// No manual implementation needed - OpenAI handles it automatically
+// Cost optimization notes:
+// - SIMPLE: gpt-4o-mini, no search (cheapest)
+// - SEARCH: gpt-4o-mini + web search (simple questions needing current data)
+// - COMPLEX: gpt-5.1, no search, reasoning=none (deep analysis, no current data)
+// - BOTH: gpt-5.1 + web search, reasoning=none (deep analysis + current data)
+// This smart routing reduces costs significantly vs always using premium models

@@ -268,7 +268,7 @@ X-API-Key: your-api-key
 
 ## Admin Dashboard
 
-The admin dashboard provides a web-based interface for monitoring your Clotilde instance.
+The admin dashboard provides a web-based interface for monitoring and configuring your Clotilde instance.
 
 ### Features
 
@@ -276,6 +276,7 @@ The admin dashboard provides a web-based interface for monitoring your Clotilde 
 - **Usage Statistics**: Total requests, average response time, error rate, model usage distribution
 - **Real-time Updates**: Auto-refresh every 10 seconds (configurable)
 - **Request Tracing**: Each request gets a unique ID (`X-Request-ID` header) for debugging
+- **Runtime Configuration**: Change system prompt and model selection without redeployment
 
 ### Setup
 
@@ -296,7 +297,20 @@ The admin dashboard provides a web-based interface for monitoring your Clotilde 
 | `GET /admin/` | Dashboard HTML page |
 | `GET /admin/logs` | JSON API for log entries (supports pagination and filtering) |
 | `GET /admin/stats` | JSON API for aggregated statistics |
+| `GET /admin/config` | Get current runtime configuration (system prompt, models) |
+| `POST /admin/config` | Update runtime configuration (requires JSON body) |
 | `GET /health` | Enhanced health check with uptime, request count, and memory usage |
+
+### Runtime Configuration
+
+The admin dashboard allows you to change the system prompt and model selection at runtime without redeploying:
+
+1. **System Prompt**: Edit the prompt template in the settings card. Use `%s` as a placeholder for the current date/time.
+2. **Model Selection**: Choose from available OpenAI models:
+   - **Standard Models** (fast/cheap): `gpt-4.1-nano`, `gpt-4.1-mini`, `gpt-4o-mini`, `gpt-3.5-turbo`
+   - **Premium Models** (powerful): `gpt-4.1`, `gpt-4o`, `o4-mini`, `o3`, `gpt-5.1`, and more
+
+**Note**: Configuration changes are in-memory and will reset to defaults if the Cloud Run instance restarts. Changes apply immediately to all new requests.
 
 ### Security
 

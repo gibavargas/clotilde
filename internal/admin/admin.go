@@ -1,8 +1,10 @@
 package admin
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -74,7 +76,7 @@ func (h *Handler) HandleDashboard(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(dashboardHTML))
 }
 
-// HandleLogs returns log entries as JSON
+// HandleLogs returns log entries as JSON, querying Cloud Logging when needed
 func (h *Handler) HandleLogs(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 
@@ -88,6 +90,7 @@ func (h *Handler) HandleLogs(w http.ResponseWriter, r *http.Request) {
 	// Filters
 	model := query.Get("model")
 	status := query.Get("status")
+	source := query.Get("source") // "memory", "cloud", or "both"
 
 	var startDate, endDate *time.Time
 	if start := query.Get("start_date"); start != "" {
@@ -104,24 +107,107 @@ func (h *Handler) HandleLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var entries []logging.LogEntry
-	if model != "" || status != "" || startDate != nil || endDate != nil {
-		entries = h.logger.GetEntriesFiltered(limit, offset, model, status, startDate, endDate)
-	} else {
-		entries = h.logger.GetEntries(limit, offset)
+	var total int
+	var fromCloud bool
+
+	bufferCount := h.logger.GetCount()
+
+	// Determine if we need to query Cloud Logging
+	needsCloudLogging := false
+	if source == "cloud" || source == "both" {
+		needsCloudLogging = true
+	} else if source == "" {
+		// Auto-detect: use Cloud Logging if:
+		// 1. Buffer is empty
+		// 2. Offset is beyond buffer capacity
+		// 3. Date range extends beyond buffer (more than 1 hour ago)
+		if bufferCount == 0 {
+			needsCloudLogging = true
+		} else if offset >= bufferCount {
+			needsCloudLogging = true
+		} else if startDate != nil && time.Since(*startDate) > time.Hour {
+			needsCloudLogging = true
+		}
+	}
+
+	// Get entries from in-memory buffer
+	if source != "cloud" {
+		if model != "" || status != "" || startDate != nil || endDate != nil {
+			entries = h.logger.GetEntriesFiltered(limit, offset, model, status, startDate, endDate)
+		} else {
+			entries = h.logger.GetEntries(limit, offset)
+		}
+		total = bufferCount
+	}
+
+	// Query Cloud Logging if needed
+	if needsCloudLogging {
+		projectID := logging.GetProjectID()
+		if projectID != "" {
+			ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+			defer cancel()
+
+			queryOpts := logging.QueryOptions{
+				Limit:     limit * 2, // Get more to account for filtering
+				Offset:    0,         // We'll handle offset after filtering
+				Model:     model,
+				Status:    status,
+				StartDate: startDate,
+				EndDate:   endDate,
+			}
+
+			cloudEntries, cloudTotal, err := logging.QueryCloudLogs(ctx, projectID, queryOpts)
+			if err == nil && len(cloudEntries) > 0 {
+				fromCloud = true
+
+				// Apply pagination to filtered cloud entries
+				if offset < len(cloudEntries) {
+					end := offset + limit
+					if end > len(cloudEntries) {
+						end = len(cloudEntries)
+					}
+					
+					if source == "both" && len(entries) > 0 {
+						// Merge with in-memory entries (deduplicate by ID)
+						entryMap := make(map[string]bool)
+						for _, e := range entries {
+							entryMap[e.ID] = true
+						}
+						for _, e := range cloudEntries[offset:end] {
+							if !entryMap[e.ID] {
+								entries = append(entries, e)
+							}
+						}
+						total = bufferCount + cloudTotal
+					} else {
+						entries = cloudEntries[offset:end]
+						total = cloudTotal
+					}
+				} else {
+					// Offset beyond available entries
+					entries = []logging.LogEntry{}
+					total = cloudTotal
+				}
+			} else if err != nil {
+				log.Printf("Error querying Cloud Logging: %v", err)
+			}
+		}
 	}
 
 	response := struct {
-		Entries []logging.LogEntry `json:"entries"`
-		Count   int                `json:"count"`
-		Offset  int                `json:"offset"`
-		Limit   int                `json:"limit"`
-		Total   int                `json:"total"`
+		Entries   []logging.LogEntry `json:"entries"`
+		Count     int                 `json:"count"`
+		Offset    int                 `json:"offset"`
+		Limit     int                 `json:"limit"`
+		Total     int                 `json:"total"`
+		FromCloud bool               `json:"from_cloud,omitempty"`
 	}{
-		Entries: entries,
-		Count:   len(entries),
-		Offset:  offset,
-		Limit:   limit,
-		Total:   h.logger.GetCount(),
+		Entries:   entries,
+		Count:     len(entries),
+		Offset:    offset,
+		Limit:     limit,
+		Total:     total,
+		FromCloud: fromCloud,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -136,11 +222,62 @@ func (h *Handler) HandleStats(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(stats)
 }
 
+// HandleGetConfig returns the current runtime configuration as JSON
+func (h *Handler) HandleGetConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	config := GetConfig()
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(config); err != nil {
+		log.Printf("Error encoding config: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+}
+
+// HandleSetConfig updates the runtime configuration from JSON POST body
+func (h *Handler) HandleSetConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var newConfig RuntimeConfig
+	if err := json.NewDecoder(r.Body).Decode(&newConfig); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if err := SetConfig(newConfig); err != nil {
+		log.Printf("Error setting config: %v", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Return updated config
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(newConfig)
+}
+
 // RegisterRoutes registers admin routes on the given mux
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// Protected admin routes
 	mux.HandleFunc("/admin/", h.BasicAuthMiddleware(h.HandleDashboard))
 	mux.HandleFunc("/admin/logs", h.BasicAuthMiddleware(h.HandleLogs))
 	mux.HandleFunc("/admin/stats", h.BasicAuthMiddleware(h.HandleStats))
+	mux.HandleFunc("/admin/config", h.BasicAuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			h.HandleGetConfig(w, r)
+		} else if r.Method == http.MethodPost {
+			h.HandleSetConfig(w, r)
+		} else {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	}))
 }
 
