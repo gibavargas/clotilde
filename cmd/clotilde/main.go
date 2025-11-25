@@ -68,22 +68,38 @@ Output format:
 - Do not include your name or meta‑comments unless I ask; stay in character as Clotilde.
 - NEVER end with a question or ask for more information.
 - NEVER include disclaimers about information being approximate, time-sensitive, or subject to change unless it's genuinely relevant context (e.g., "a cotação pode variar durante o pregão" is fine, but "notícias podem mudar a qualquer momento" is not).`
+)
 
-	routerPrompt = `Classify this question into ONE category based on TWO factors:
-1. Does it need CURRENT/REAL-TIME info? (news, prices, weather, today's events, latest updates)
-2. Does it need DEEP ANALYSIS? (comparisons, reasoning, detailed explanations)
+// Keywords for code-based routing (no LLM calls needed)
+var (
+	// Web search keywords - queries that need current/real-time information
+	webSearchKeywords = []string{
+		// Portuguese
+		"últimas notícias", "notícias recentes", "notícias de hoje", "notícias",
+		"hoje", "agora", "atual", "atualmente", "recente", "recentemente",
+		"cotação", "preço atual", "dólar hoje", "euro hoje", "bitcoin hoje",
+		"tempo agora", "previsão do tempo", "clima hoje", "vai chover",
+		"aconteceu", "acontecendo", "prisão", "preso", "morreu", "morte",
+		"resultado", "placar", "jogo de hoje", "partida",
+		// English
+		"latest news", "recent news", "today's news", "breaking news",
+		"today", "now", "current", "currently", "recent", "recently",
+		"price today", "weather now", "forecast",
+		"what happened", "happening", "arrested", "died",
+	}
 
-Categories:
-- SIMPLE: No current info needed, no deep analysis (greetings, basic facts, definitions, historical facts)
-- SEARCH: Needs current info, but simple answer (today's weather, current price, LATEST NEWS, recent events, "últimas notícias", "notícias recentes", current status)
-- COMPLEX: Needs deep analysis, but NO current info (explain a concept, analyze a book, creative writing, philosophical questions)
-- BOTH: Needs current info AND deep analysis (analyze today's market trends, compare recent events, analyze latest news)
-
-CRITICAL: Questions about "últimas notícias", "notícias recentes", "latest news", "recent news", current events, or asking "what happened" MUST be classified as "search" or "both", NEVER "simple" or "complex".
-
-Answer with ONLY one word: "simple", "search", "complex", or "both"
-
-Question: %s`
+	// Complex query keywords - queries that need deep analysis
+	complexKeywords = []string{
+		// Portuguese
+		"explique", "analise", "compare", "por que", "porque",
+		"como funciona", "qual a diferença", "diferenças entre",
+		"vantagens e desvantagens", "prós e contras",
+		"história de", "biografia", "o que é", "defina",
+		// English
+		"explain", "analyze", "compare", "why", "how does",
+		"what is the difference", "pros and cons", "advantages",
+		"history of", "biography", "what is", "define",
+	}
 )
 
 // RouteDecision contains routing information for a request
@@ -237,7 +253,7 @@ func main() {
 	handler = logging.RequestIDMiddleware(handler)
 
 	serverAddr := fmt.Sprintf(":%s", port)
-	
+
 	// Create HTTP server with graceful shutdown
 	srv := &http.Server{
 		Addr:    serverAddr,
@@ -435,28 +451,28 @@ func removeURLsFromText(text string) string {
 	// Remove URLs (http://, https://, www.)
 	urlPattern := regexp.MustCompile(`(?i)(https?://|www\.)[^\s]+`)
 	text = urlPattern.ReplaceAllString(text, "")
-	
+
 	// Remove domain patterns like "example.com" or "g1.com.br"
 	domainPattern := regexp.MustCompile(`(?i)\b[a-z0-9]+([.-][a-z0-9]+)*\.(com|br|org|net|gov|edu|io|co|info|me|tv|xyz)[^\s]*`)
 	text = domainPattern.ReplaceAllString(text, "")
-	
+
 	// Remove phrases that might lead to URLs
 	text = strings.ReplaceAll(text, "você pode ver em", "")
 	text = strings.ReplaceAll(text, "acesse", "")
 	text = strings.ReplaceAll(text, "visite", "")
 	text = strings.ReplaceAll(text, "veja em", "")
-	
+
 	// Clean up extra spaces
 	spacePattern := regexp.MustCompile(`\s+`)
 	text = spacePattern.ReplaceAllString(text, " ")
-	
+
 	return strings.TrimSpace(text)
 }
 
 func respondSuccess(w http.ResponseWriter, response string) {
 	// Remove any URLs that might have escaped the system prompt
 	response = removeURLsFromText(response)
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	// CORS restricted to Apple Shortcuts origin for security
 	setCORSHeaders(w)
@@ -649,125 +665,105 @@ func (s *Server) createResponse(ctx context.Context, route RouteDecision, instru
 	return "", fmt.Errorf("empty response from API")
 }
 
+// Models that support web search in Responses API
+// According to OpenAI docs: "Web search is currently not supported in gpt-5 with minimal reasoning, and gpt-4.1-nano"
+// gpt-5-mini and gpt-5-nano are cheap variants that may not support web search
+var modelsWithWebSearch = map[string]bool{
+	"gpt-4o":             true,
+	"gpt-4o-mini":        true,
+	"gpt-4o-2024-08-06":  true,
+	"chatgpt-4o-latest":  true,
+	"gpt-4-turbo":        true,
+	"gpt-4.1":            true,
+	"gpt-4.1-mini":       true,
+	// gpt-4.1-nano does NOT support web search
+	// gpt-5 series needs reasoning >= "low" for web search
+	"gpt-5":     true, // with reasoning
+	"gpt-5.1":   true, // with reasoning
+	"gpt-5-pro": true, // with reasoning
+	// gpt-5-mini and gpt-5-nano may not support web search
+	"o3":      true,
+	"o3-mini": true,
+	"o4-mini": true,
+}
+
+// Fallback model for web search when configured model doesn't support it
+const webSearchFallbackModel = "gpt-4o-mini"
+
+// containsAny checks if the text contains any of the keywords
+func containsAny(text string, keywords []string) bool {
+	textLower := strings.ToLower(text)
+	for _, keyword := range keywords {
+		if strings.Contains(textLower, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
 // routeToModel determines which model and tools to use based on question type
-// Cost optimization: uses cheaper models and only enables web search when needed
+// Uses CODE-BASED routing (no LLM calls) for cost efficiency
 func (s *Server) routeToModel(ctx context.Context, question string) RouteDecision {
 	// Get dynamic model configuration
 	config := admin.GetConfig()
 	standardModel := config.StandardModel
 	premiumModel := config.PremiumModel
 
-	// Use standard model for routing (very cheap)
-	routerCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
+	// Code-based routing: detect keywords to determine query type
+	needsWebSearch := containsAny(question, webSearchKeywords)
+	needsDeepAnalysis := containsAny(question, complexKeywords)
 
-	routerResp, err := s.openaiClient.CreateChatCompletion(routerCtx, openai.ChatCompletionRequest{
-		Model: standardModel,
-		Messages: []openai.ChatCompletionMessage{
-			{
-				Role:    openai.ChatMessageRoleUser,
-				Content: fmt.Sprintf(routerPrompt, question),
-			},
-		},
-		MaxTokens:   5, // Only need one word
-		Temperature: 0.0,
-	})
+	log.Printf("Code-based routing: needsWebSearch=%v, needsDeepAnalysis=%v", needsWebSearch, needsDeepAnalysis)
 
-	// Default: use standard model without web search
-	defaultDecision := RouteDecision{
-		Model:     standardModel,
-		WebSearch: false,
+	// Determine base model and web search requirement
+	var model string
+	var webSearch bool
+	var reasoningEffort string
+
+	if needsWebSearch && needsDeepAnalysis {
+		// BOTH: Need current info AND deep analysis
+		model = premiumModel
+		webSearch = true
+		log.Printf("Route: BOTH (premium + web search)")
+	} else if needsWebSearch {
+		// SEARCH: Need current info, simple answer
+		model = standardModel
+		webSearch = true
+		log.Printf("Route: SEARCH (standard + web search)")
+	} else if needsDeepAnalysis {
+		// COMPLEX: Need deep analysis, no current info
+		model = premiumModel
+		webSearch = false
+		log.Printf("Route: COMPLEX (premium, no web search)")
+	} else {
+		// SIMPLE: Basic query, no special needs
+		model = standardModel
+		webSearch = false
+		log.Printf("Route: SIMPLE (standard, no web search)")
 	}
 
-	if err != nil {
-		log.Printf("Router error, using default: %v", err)
-		return defaultDecision
-	}
+	// If web search is needed, ensure the model supports it
+	if webSearch {
+		supportsWebSearch := modelsWithWebSearch[model]
+		isGPT5 := strings.HasPrefix(model, "gpt-5")
 
-	if len(routerResp.Choices) == 0 {
-		log.Printf("Router returned no choices, using default")
-		return defaultDecision
-	}
-
-	decision := strings.ToLower(strings.TrimSpace(routerResp.Choices[0].Message.Content))
-	log.Printf("Router decision: %s", decision)
-
-	// Safety fallback: Force web search for queries about latest/recent news
-	questionLower := strings.ToLower(question)
-	forceWebSearch := strings.Contains(questionLower, "últimas notícias") ||
-		strings.Contains(questionLower, "notícias recentes") ||
-		strings.Contains(questionLower, "latest news") ||
-		strings.Contains(questionLower, "recent news") ||
-		strings.Contains(questionLower, "notícias de hoje") ||
-		strings.Contains(questionLower, "hoje") ||
-		strings.Contains(questionLower, "agora") ||
-		strings.Contains(questionLower, "atual")
-
-	// SIMPLE: Use standard model, no web search (cheapest)
-	// BUT: Override if query explicitly asks for latest/recent news
-	if strings.Contains(decision, "simple") {
-		if forceWebSearch {
-			log.Printf("Forcing web search for latest news query despite 'simple' classification")
-			return RouteDecision{
-				Model:           standardModel,
-				WebSearch:       true,
-				ReasoningEffort: "", // Standard models don't have reasoning
-			}
-		}
-		return RouteDecision{
-			Model:           standardModel,
-			WebSearch:       false,
-			ReasoningEffort: "", // Standard models don't have reasoning
+		if !supportsWebSearch {
+			// Model doesn't support web search, use fallback
+			log.Printf("Model %s does not support web search, using fallback: %s", model, webSearchFallbackModel)
+			model = webSearchFallbackModel
+			reasoningEffort = "" // gpt-4o-mini doesn't need/support reasoning config
+		} else if isGPT5 {
+			// gpt-5 series needs reasoning >= "low" for web search
+			reasoningEffort = "low"
+			log.Printf("gpt-5 with web search: using reasoning='low' (minimum required)")
 		}
 	}
 
-	// SEARCH: Use standard model with web search (medium cost - simple + current data)
-	if strings.Contains(decision, "search") {
-		return RouteDecision{
-			Model:           standardModel,
-			WebSearch:       true,
-			ReasoningEffort: "", // Standard models don't have reasoning
-		}
+	return RouteDecision{
+		Model:           model,
+		WebSearch:       webSearch,
+		ReasoningEffort: reasoningEffort,
 	}
-
-	// BOTH: Use premium model WITH web search (premium - complex + current data)
-	if strings.Contains(decision, "both") {
-		reasoningEffort := "none" // Default: disable reasoning to save cost
-		// gpt-5 requires reasoning >= "low" for web search to work
-		if strings.HasPrefix(premiumModel, "gpt-5") {
-			reasoningEffort = "low" // Minimum required for web search
-		}
-		return RouteDecision{
-			Model:           premiumModel,
-			WebSearch:       true,
-			ReasoningEffort: reasoningEffort,
-		}
-	}
-
-	// COMPLEX: Use premium model without web search (premium - complex, no current data)
-	// BUT: Override if query explicitly asks for latest/recent news
-	if strings.Contains(decision, "complex") {
-		if forceWebSearch {
-			log.Printf("Forcing web search for latest news query despite 'complex' classification")
-			reasoningEffort := "none"
-			if strings.HasPrefix(premiumModel, "gpt-5") {
-				reasoningEffort = "low" // Minimum required for web search
-			}
-			return RouteDecision{
-				Model:           premiumModel,
-				WebSearch:       true,
-				ReasoningEffort: reasoningEffort,
-			}
-		}
-		return RouteDecision{
-			Model:           premiumModel,
-			WebSearch:       false,
-			ReasoningEffort: "none", // Disable reasoning to save cost (no web search needed)
-		}
-	}
-
-	// Default to standard model
-	return defaultDecision
 }
 
 // modelSupportsReasoning checks if a model supports the reasoning parameter
