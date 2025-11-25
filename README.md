@@ -4,10 +4,6 @@
 
 A voice-activated CarPlay assistant powered by GPT-5 with web search capabilities. Built with Go for minimal resource usage and deployed on Google Cloud Run with Artifact Registry.
 
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
 ## Features
 
 - 🚗 CarPlay integration via Apple Shortcuts
