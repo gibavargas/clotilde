@@ -16,6 +16,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - 🔒 Security-first design with API key authentication, rate limiting, and input validation
 - 💰 Free tier optimized (Google Cloud Artifact Registry + Cloud Run)
 - 🐳 Minimal Docker image (~10-15MB)
+- 📊 Admin dashboard for monitoring logs and usage statistics
+- 🔍 Request tracing with unique request IDs
 
 ## Architecture
 
@@ -154,6 +156,13 @@ The `.env` file should contain:
 - `GOOGLE_CLOUD_PROJECT`: Your Google Cloud project ID
 - `SERVICE_URL`: Your deployed service URL (optional, for testing)
 
+#### Admin Dashboard (Optional)
+
+To enable the admin dashboard for monitoring logs and statistics:
+- `ADMIN_USER`: Admin username for Basic Auth
+- `ADMIN_PASSWORD`: Admin password for Basic Auth (use a strong password)
+- `LOG_BUFFER_SIZE`: Maximum log entries to keep in memory (default: 1000)
+
 ### 5. Local Development (Optional)
 
 For local testing:
@@ -257,6 +266,44 @@ X-API-Key: your-api-key
 }
 ```
 
+## Admin Dashboard
+
+The admin dashboard provides a web-based interface for monitoring your Clotilde instance.
+
+### Features
+
+- **Request Logs**: View recent requests with filtering by model, status, and date range
+- **Usage Statistics**: Total requests, average response time, error rate, model usage distribution
+- **Real-time Updates**: Auto-refresh every 10 seconds (configurable)
+- **Request Tracing**: Each request gets a unique ID (`X-Request-ID` header) for debugging
+
+### Setup
+
+1. Set environment variables:
+   ```bash
+   export ADMIN_USER=your-username
+   export ADMIN_PASSWORD=your-strong-password
+   ```
+
+2. Access the dashboard at: `https://your-service-url.run.app/admin/`
+
+3. Log in with HTTP Basic Auth using your credentials
+
+### API Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /admin/` | Dashboard HTML page |
+| `GET /admin/logs` | JSON API for log entries (supports pagination and filtering) |
+| `GET /admin/stats` | JSON API for aggregated statistics |
+| `GET /health` | Enhanced health check with uptime, request count, and memory usage |
+
+### Security
+
+- Protected by HTTP Basic Auth (separate from API key authentication)
+- No sensitive data stored in logs (only metadata like message length, IP hash)
+- Admin credentials should be stored securely (use Secret Manager in production)
+
 ## Security Features
 
 - **API Key Authentication**: All requests require valid API key
@@ -268,6 +315,7 @@ X-API-Key: your-api-key
 - **Non-root Container**: Runs as unprivileged user
 - **No Secrets in Code**: All API keys and sensitive data use environment variables or Secret Manager
 - **Git-Safe**: `.env` files and sensitive documentation excluded from version control
+- **Admin Dashboard**: Protected by HTTP Basic Auth with separate credentials
 
 **Before Sharing on GitHub**: All API keys have been replaced with placeholders (`YOUR_API_KEY`, `YOUR_SERVICE_URL`) in documentation files. Sensitive files are excluded via `.gitignore`.
 

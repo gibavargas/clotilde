@@ -2,6 +2,7 @@ package ratelimit
 
 import (
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -100,8 +101,8 @@ func (rl *rateLimiter) isAllowed(key string) bool {
 func Middleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Skip rate limiting for health check
-			if r.URL.Path == "/health" {
+			// Skip rate limiting for health check and admin routes
+			if r.URL.Path == "/health" || strings.HasPrefix(r.URL.Path, "/admin") {
 				next.ServeHTTP(w, r)
 				return
 			}

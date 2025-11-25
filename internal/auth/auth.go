@@ -3,14 +3,15 @@ package auth
 import (
 	"crypto/subtle"
 	"net/http"
+	"strings"
 )
 
 // Middleware validates the X-API-Key header against the expected API key
 func Middleware(expectedAPIKey string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Skip auth for health check
-			if r.URL.Path == "/health" {
+			// Skip auth for health check and admin routes (admin has its own Basic Auth)
+			if r.URL.Path == "/health" || strings.HasPrefix(r.URL.Path, "/admin") {
 				next.ServeHTTP(w, r)
 				return
 			}

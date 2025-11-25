@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 )
 
 const (
@@ -20,8 +21,8 @@ type requestBody struct {
 func Middleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Skip validation for health check
-			if r.URL.Path == "/health" {
+			// Skip validation for health check, admin routes, and OPTIONS preflight
+			if r.URL.Path == "/health" || strings.HasPrefix(r.URL.Path, "/admin") || r.Method == http.MethodOptions {
 				next.ServeHTTP(w, r)
 				return
 			}

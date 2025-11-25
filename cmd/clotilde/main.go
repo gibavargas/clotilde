@@ -9,19 +9,24 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
+	secretmanager "cloud.google.com/go/secretmanager/apiv1"
+	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
+	"github.com/clotilde/carplay-assistant/internal/admin"
 	"github.com/clotilde/carplay-assistant/internal/auth"
+	"github.com/clotilde/carplay-assistant/internal/logging"
 	"github.com/clotilde/carplay-assistant/internal/ratelimit"
 	"github.com/clotilde/carplay-assistant/internal/validator"
 	"github.com/sashabaranov/go-openai"
-	secretmanager "cloud.google.com/go/secretmanager/apiv1"
-	"cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
 )
 
+var startTime = time.Now()
+
 const (
-	timezoneBR                  = "America/Sao_Paulo"
+	timezoneBR                   = "America/Sao_Paulo"
 	clotildeSystemPromptTemplate = `You are "Clotilde", my in‑car copilot, accessed via an Apple Shortcut in Apple CarPlay.
 
 Current date and time: %s (Brazil/São Paulo timezone)
@@ -32,10 +37,10 @@ Constraints and safety:
 - CRITICAL: NEVER ask questions to the user. This is a single-turn conversation with no follow-up. Always provide the best answer you can with the information available, even if incomplete. If information is missing, state what you know and acknowledge limitations, but do not ask for clarification.
 
 Web search behavior:
-- You have access to web search capabilities that return recent results from the public web.
+- You have access to web search capabilities that return results from the public web.
 - Use web search when the question is about current events, recent news, live prices, weather "today" or "now", or anything where fresh/real-time data is essential.
 - If the question references "today", "now", "recent", "latest", or similar time-sensitive terms, use web search.
-- For historical facts, general knowledge, or information that doesn't change, you may not need web search.
+- For historical facts, general knowledge, or information that doesn't change, you may not need web search but you are still free to use it as you think it may be needed.
 - CRITICAL: When using web search, ALWAYS cite your sources with specific publication names (e.g., "Segundo o G1..." or "De acordo com a BBC...").
 - When reporting news or time-sensitive information, ALWAYS include the specific date and time when available (e.g., "Segundo o G1, às 14h30 de hoje..." or "De acordo com a Reuters, na manhã de 24 de novembro...").
 - When searching for information or news about a specific country, perform the web search in that country's language (e.g., search in English for US news, Spanish for Spain/Mexico news, French for France news, etc.), but always respond in Brazilian Portuguese as usual.
@@ -58,8 +63,8 @@ Output format:
 
 	routerPrompt = `Classify this question as "simple" or "complex".
 
-SIMPLE (use nano): Basic facts, greetings, simple definitions, straightforward questions that need 1-2 sentences.
-COMPLEX (use full): Analysis, comparisons, explanations, multi-step reasoning, creative tasks, nuanced topics.
+SIMPLE (use nano): Basic facts, greetings, simple definitions, straightforward questions that can be answered easily with factual information.
+COMPLEX (use full): Analysis, comparisons, explanations, multi-step reasoning, creative tasks, nuanced topics, questions that require more than a few sentences to answer.
 
 Answer ONLY with one word: "simple" or "complex"
 
@@ -79,14 +84,21 @@ type Server struct {
 	openaiClient *openai.Client
 	openaiAPIKey string
 	apiKeySecret string
+	logger       *logging.Logger
 }
 
 // ResponsesAPIRequest represents the request body for Responses API
 type ResponsesAPIRequest struct {
-	Model       string                 `json:"model"`
-	Input       interface{}            `json:"input"` // Can be string or []map[string]interface{}
-	Instructions string                `json:"instructions,omitempty"`
-	Store       *bool                  `json:"store,omitempty"`
+	Model        string        `json:"model"`
+	Input        interface{}   `json:"input"` // Can be string or []map[string]interface{}
+	Instructions string        `json:"instructions,omitempty"`
+	Store        *bool         `json:"store,omitempty"`
+	Tools        []interface{} `json:"tools,omitempty"` // Tools like web_search
+}
+
+// WebSearchTool represents the web_search tool configuration
+type WebSearchTool struct {
+	Type string `json:"type"` // "web_search"
 }
 
 // ResponsesAPIResponse represents the response from Responses API
@@ -158,25 +170,40 @@ func main() {
 	// Initialize OpenAI client (still used for router)
 	openaiClient := openai.NewClient(openaiKey)
 
+	// Initialize logger
+	logger := logging.GetLogger()
+
 	server := &Server{
 		openaiClient: openaiClient,
 		openaiAPIKey: openaiKey,
 		apiKeySecret: apiKeySecret,
+		logger:       logger,
 	}
 
 	// Setup middleware chain
 	mux := http.NewServeMux()
 	mux.HandleFunc("/chat", server.handleChat)
-	mux.HandleFunc("/health", handleHealth)
+	mux.HandleFunc("/health", server.handleHealth)
 	mux.HandleFunc("/", handleOptions) // CORS preflight for root
 
-	// Middleware order (outer to inner): validator → auth → ratelimit
-	// 1. Validator: Limits request size early (prevents large payloads)
-	// 2. Auth: Validates API key before rate limiting
-	// 3. Ratelimit: Only rate-limits authenticated requests (by API key)
+	// Register admin routes (protected by HTTP Basic Auth)
+	adminHandler := admin.NewHandler(logger)
+	if adminHandler.IsEnabled() {
+		adminHandler.RegisterRoutes(mux)
+		log.Printf("Admin dashboard enabled at /admin/")
+	} else {
+		log.Printf("Admin dashboard disabled (ADMIN_USER and ADMIN_PASSWORD not set)")
+	}
+
+	// Middleware order (outer to inner): requestID → validator → auth → ratelimit
+	// 1. RequestID: Adds unique request ID for tracing
+	// 2. Validator: Limits request size early (prevents large payloads)
+	// 3. Auth: Validates API key before rate limiting
+	// 4. Ratelimit: Only rate-limits authenticated requests (by API key)
 	handler := ratelimit.Middleware()(mux)
 	handler = auth.Middleware(apiKeySecret)(handler)
 	handler = validator.Middleware()(handler)
+	handler = logging.RequestIDMiddleware(handler)
 
 	serverAddr := fmt.Sprintf(":%s", port)
 	log.Printf("Server starting on %s", serverAddr)
@@ -196,9 +223,23 @@ func getSecret(ctx context.Context, client *secretmanager.Client, projectID, sec
 	return string(result.Payload.Data), nil
 }
 
-func handleHealth(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	stats := s.logger.GetStats()
+
+	var memStats runtime.MemStats
+	runtime.ReadMemStats(&memStats)
+
+	response := map[string]interface{}{
+		"status":            "ok",
+		"uptime":            time.Since(startTime).Round(time.Second).String(),
+		"total_requests":    stats.TotalRequests,
+		"memory_mb":         memStats.Alloc / 1024 / 1024,
+		"last_request_time": stats.LastRequestTime,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	json.NewEncoder(w).Encode(response)
 }
 
 func handleOptions(w http.ResponseWriter, r *http.Request) {
@@ -223,29 +264,43 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Start timing for logging
+	startTime := time.Now()
+
+	// Get request ID from context (added by middleware)
+	requestID := logging.GetRequestID(r.Context())
+	if requestID == "" {
+		requestID = logging.GenerateRequestID()
+	}
+
+	// Add request ID to response headers
+	w.Header().Set("X-Request-ID", requestID)
+
 	// Note: We don't strictly validate Content-Type because Apple Shortcuts
 	// sometimes sends text/plain even when the body is valid JSON.
 	// The JSON decoder will fail if the body isn't valid JSON anyway.
 
 	var req ChatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.logRequest(requestID, r, "", "", "", time.Since(startTime), "error", "Invalid request body")
 		respondError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	if req.Message == "" {
+		s.logRequest(requestID, r, "", "", "", time.Since(startTime), "error", "Message is required")
 		respondError(w, "Message is required", http.StatusBadRequest)
 		return
 	}
 
 	// Log request metadata (no sensitive data)
-	log.Printf("Request received: IP=%s, MessageLength=%d", hashIP(r.RemoteAddr), len(req.Message))
+	log.Printf("[%s] Request received: IP=%s, MessageLength=%d", requestID, hashIP(r.RemoteAddr), len(req.Message))
 
 	// Route to appropriate model based on question complexity
 	routerCtx, routerCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	model := s.routeToModel(routerCtx, req.Message)
 	routerCancel()
-	log.Printf("Selected model: %s", model)
+	log.Printf("[%s] Selected model: %s", requestID, model)
 
 	// Call OpenAI with selected model
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second) // Increased timeout for web search
@@ -259,7 +314,8 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	// Responses API has native web_search support and better performance
 	response, err := s.createResponse(ctx, model, systemPrompt, req.Message)
 	if err != nil {
-		log.Printf("OpenAI Responses API error: %v", err)
+		log.Printf("[%s] OpenAI Responses API error: %v", requestID, err)
+		s.logRequest(requestID, r, req.Message, "", model, time.Since(startTime), "error", err.Error())
 		respondError(w, "Failed to get response from AI", http.StatusInternalServerError)
 		return
 	}
@@ -267,10 +323,31 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	if response == "" {
 		response = "Desculpe, não consegui processar sua solicitação. Pode repetir?"
 	}
-	
-	log.Printf("Response generated: Length=%d", len(response))
+
+	// Log successful request
+	responseTime := time.Since(startTime)
+	log.Printf("[%s] Response generated: Length=%d, Time=%v", requestID, len(response), responseTime)
+	s.logRequest(requestID, r, req.Message, response, model, responseTime, "success", "")
 
 	respondSuccess(w, response)
+}
+
+// logRequest adds a structured log entry with full input/output for Cloud Logging
+func (s *Server) logRequest(requestID string, r *http.Request, input, output, model string, responseTime time.Duration, status, errorMsg string) {
+	entry := logging.LogEntry{
+		ID:            requestID,
+		Timestamp:     time.Now(),
+		IPHash:        hashIP(r.RemoteAddr),
+		MessageLength: len(input),
+		Model:         model,
+		ResponseTime:  responseTime.Milliseconds(),
+		TokenEstimate: len(input) / 4, // Rough estimate: ~4 chars per token
+		Status:        status,
+		ErrorMessage:  errorMsg,
+		Input:         input,
+		Output:        output,
+	}
+	s.logger.Add(entry)
 }
 
 func respondSuccess(w http.ResponseWriter, response string) {
@@ -321,7 +398,7 @@ func getCurrentBrazilTime() string {
 		loc = time.UTC
 	}
 	now := time.Now().In(loc)
-	
+
 	// Format date in Portuguese
 	months := map[time.Month]string{
 		time.January:   "janeiro",
@@ -337,9 +414,9 @@ func getCurrentBrazilTime() string {
 		time.November:  "novembro",
 		time.December:  "dezembro",
 	}
-	
+
 	monthName := months[now.Month()]
-	return fmt.Sprintf("%02d de %s de %d, %02d:%02d (horário de Brasília)", 
+	return fmt.Sprintf("%02d de %s de %d, %02d:%02d (horário de Brasília)",
 		now.Day(), monthName, now.Year(), now.Hour(), now.Minute())
 }
 
@@ -348,11 +425,16 @@ func getCurrentBrazilTime() string {
 func (s *Server) createResponse(ctx context.Context, model, instructions, input string) (string, error) {
 	// Build request body for Responses API
 	store := false // Don't store state for single-turn conversations
+
+	// Enable web_search tool for real-time information
+	webSearchTool := WebSearchTool{Type: "web_search"}
+
 	reqBody := ResponsesAPIRequest{
 		Model:        model,
 		Input:        input, // Can be string or messages array
 		Instructions: instructions,
 		Store:        &store,
+		Tools:        []interface{}{webSearchTool}, // Enable web search
 	}
 
 	jsonData, err := json.Marshal(reqBody)
@@ -480,4 +562,3 @@ func (s *Server) routeToModel(ctx context.Context, question string) string {
 // Note: Web search is now handled natively by OpenAI's API
 // The model gpt-5.1-2025-11-13 has built-in web search capabilities
 // No manual implementation needed - OpenAI handles it automatically
-
