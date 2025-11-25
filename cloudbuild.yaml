@@ -58,7 +58,6 @@ substitutions:
   _SERVICE_NAME: 'clotilde'
   _OPENAI_SECRET: 'your-openai-secret-name'  # Override with --substitutions=_OPENAI_SECRET=actual-name
   _API_SECRET: 'your-api-secret-name'        # Override with --substitutions=_API_SECRET=actual-name
-  _ADMIN_SECRET: ''                          # Optional: admin password secret name for dashboard
   _ADMIN_USER: ''                            # Optional: admin username for dashboard
   _LOG_BUFFER_SIZE: '1000'                   # Optional: max log entries in memory
 
