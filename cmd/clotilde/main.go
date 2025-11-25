@@ -70,14 +70,16 @@ Output format:
 - NEVER include disclaimers about information being approximate, time-sensitive, or subject to change unless it's genuinely relevant context (e.g., "a cotação pode variar durante o pregão" is fine, but "notícias podem mudar a qualquer momento" is not).`
 
 	routerPrompt = `Classify this question into ONE category based on TWO factors:
-1. Does it need CURRENT/REAL-TIME info? (news, prices, weather, today's events)
+1. Does it need CURRENT/REAL-TIME info? (news, prices, weather, today's events, latest updates)
 2. Does it need DEEP ANALYSIS? (comparisons, reasoning, detailed explanations)
 
 Categories:
-- SIMPLE: No current info needed, no deep analysis (greetings, basic facts, definitions)
-- SEARCH: Needs current info, but simple answer (today's weather, current price, latest news)
-- COMPLEX: Needs deep analysis, but NO current info (explain a concept, analyze a book, creative writing)
-- BOTH: Needs current info AND deep analysis (analyze today's market trends, compare recent events)
+- SIMPLE: No current info needed, no deep analysis (greetings, basic facts, definitions, historical facts)
+- SEARCH: Needs current info, but simple answer (today's weather, current price, LATEST NEWS, recent events, "últimas notícias", "notícias recentes", current status)
+- COMPLEX: Needs deep analysis, but NO current info (explain a concept, analyze a book, creative writing, philosophical questions)
+- BOTH: Needs current info AND deep analysis (analyze today's market trends, compare recent events, analyze latest news)
+
+CRITICAL: Questions about "últimas notícias", "notícias recentes", "latest news", "recent news", current events, or asking "what happened" MUST be classified as "search" or "both", NEVER "simple" or "complex".
 
 Answer with ONLY one word: "simple", "search", "complex", or "both"
 
@@ -690,8 +692,28 @@ func (s *Server) routeToModel(ctx context.Context, question string) RouteDecisio
 	decision := strings.ToLower(strings.TrimSpace(routerResp.Choices[0].Message.Content))
 	log.Printf("Router decision: %s", decision)
 
+	// Safety fallback: Force web search for queries about latest/recent news
+	questionLower := strings.ToLower(question)
+	forceWebSearch := strings.Contains(questionLower, "últimas notícias") ||
+		strings.Contains(questionLower, "notícias recentes") ||
+		strings.Contains(questionLower, "latest news") ||
+		strings.Contains(questionLower, "recent news") ||
+		strings.Contains(questionLower, "notícias de hoje") ||
+		strings.Contains(questionLower, "hoje") ||
+		strings.Contains(questionLower, "agora") ||
+		strings.Contains(questionLower, "atual")
+
 	// SIMPLE: Use standard model, no web search (cheapest)
+	// BUT: Override if query explicitly asks for latest/recent news
 	if strings.Contains(decision, "simple") {
+		if forceWebSearch {
+			log.Printf("Forcing web search for latest news query despite 'simple' classification")
+			return RouteDecision{
+				Model:           standardModel,
+				WebSearch:       true,
+				ReasoningEffort: "", // Standard models don't have reasoning
+			}
+		}
 		return RouteDecision{
 			Model:           standardModel,
 			WebSearch:       false,
@@ -723,7 +745,20 @@ func (s *Server) routeToModel(ctx context.Context, question string) RouteDecisio
 	}
 
 	// COMPLEX: Use premium model without web search (premium - complex, no current data)
+	// BUT: Override if query explicitly asks for latest/recent news
 	if strings.Contains(decision, "complex") {
+		if forceWebSearch {
+			log.Printf("Forcing web search for latest news query despite 'complex' classification")
+			reasoningEffort := "none"
+			if strings.HasPrefix(premiumModel, "gpt-5") {
+				reasoningEffort = "low" // Minimum required for web search
+			}
+			return RouteDecision{
+				Model:           premiumModel,
+				WebSearch:       true,
+				ReasoningEffort: reasoningEffort,
+			}
+		}
 		return RouteDecision{
 			Model:           premiumModel,
 			WebSearch:       false,
