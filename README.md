@@ -11,7 +11,7 @@ A voice-activated CarPlay assistant powered by GPT-5 with web search capabilitie
 - 🇧🇷 Brazilian Portuguese responses (default)
 - 🔒 Security-first design with API key authentication, rate limiting, and input validation
 - 💰 Free tier optimized (Google Cloud Artifact Registry + Cloud Run)
-- 🐳 Minimal Docker image (~10-15MB)
+- 🐳 Minimal Docker image (~14.9MB)
 - 📊 Admin dashboard for monitoring logs and usage statistics
 - ⚙️ **Dynamic configuration**: Change system prompt and models without redeployment
 - 🔍 Request tracing with unique request IDs
@@ -332,7 +332,7 @@ See [SECURITY.md](SECURITY.md) for detailed security documentation.
 
 ## Resource Usage
 
-- **Docker Image**: ~10-15MB (Alpine-based)
+- **Docker Image**: ~14.9MB (Alpine-based)
 - **Memory**: 256MB (Cloud Run minimum)
 - **CPU**: 1 vCPU
 - **Artifact Registry**: Free tier (0.5GB storage, 1GB egress/month)

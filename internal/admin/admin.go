@@ -765,6 +765,15 @@ func (h *Handler) HandleSetConfig(w http.ResponseWriter, r *http.Request) {
 // RegisterRoutes registers admin routes on the given mux
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// Protected admin routes
+	// Handle both /admin and /admin/ for better compatibility
+	mux.HandleFunc("/admin", h.BasicAuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		// Redirect /admin to /admin/ for consistency
+		if r.URL.Path == "/admin" {
+			http.Redirect(w, r, "/admin/", http.StatusMovedPermanently)
+			return
+		}
+		h.HandleDashboard(w, r)
+	}))
 	mux.HandleFunc("/admin/", h.BasicAuthMiddleware(h.HandleDashboard))
 	mux.HandleFunc("/admin/logs", h.BasicAuthMiddleware(h.HandleLogs))
 	mux.HandleFunc("/admin/stats", h.BasicAuthMiddleware(h.HandleStats))

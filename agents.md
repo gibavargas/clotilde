@@ -1474,17 +1474,25 @@ Before deploying, ensure you have:
 
 ### Standard Deployment (With Admin Dashboard)
 
-**CRITICAL**: All deployments should include the admin dashboard. This is the standard deployment method.
+**CRITICAL**: All deployments MUST include the admin dashboard. This is the standard deployment method.
 
 **Requirements**:
-- Admin username (set via `_ADMIN_USER` substitution)
-- Admin password secret (name stored in `_ADMIN_SECRET` substitution)
+- Admin username (set via `_ADMIN_USER` substitution) - **REQUIRED**
+- Admin password secret (name stored in `_ADMIN_SECRET` substitution) - **REQUIRED**
 
 **Command**:
 ```bash
+# Get your secret names first
+OPENAI_SECRET=$(gcloud secrets list --format="value(name)" | grep -iE "openai|oai" | head -1)
+API_SECRET=$(gcloud secrets list --format="value(name)" | grep -E "clotilde-api-key|api-key" | head -1)
+ADMIN_SECRET=$(gcloud secrets list --format="value(name)" | grep -i admin | head -1)
+
+# Deploy with admin dashboard enabled
 gcloud builds submit --config=cloudbuild.yaml \
-  --substitutions=_OPENAI_SECRET=<openai-secret-name>,_API_SECRET=<api-secret-name>,_ADMIN_SECRET=<admin-secret-name>,_ADMIN_USER=<admin-username>
+  --substitutions=_OPENAI_SECRET=$OPENAI_SECRET,_API_SECRET=$API_SECRET,_ADMIN_SECRET=$ADMIN_SECRET,_ADMIN_USER=admin
 ```
+
+**⚠️ IMPORTANT**: If `_ADMIN_USER` or `_ADMIN_SECRET` are not provided, the admin dashboard will return 404 (not found) because routes won't be registered.
 
 **What this does**:
 - Builds Docker image from current directory
@@ -1629,10 +1637,25 @@ func (h *Handler) IsEnabled() bool {
    gcloud run services describe clotilde --region=us-central1 \
      --format="get(spec.template.spec.containers[0].env)" | grep ADMIN
    ```
-2. If missing, redeploy with `_ADMIN_SECRET` and `_ADMIN_USER` substitutions
+2. If missing, redeploy with `_ADMIN_SECRET` and `_ADMIN_USER` substitutions:
+   ```bash
+   # Get secret names
+   OPENAI_SECRET=$(gcloud secrets list --format="value(name)" | grep -iE "openai|oai" | head -1)
+   API_SECRET=$(gcloud secrets list --format="value(name)" | grep -E "clotilde-api-key|api-key" | head -1)
+   ADMIN_SECRET=$(gcloud secrets list --format="value(name)" | grep -i admin | head -1)
+   
+   # Redeploy with admin enabled
+   gcloud builds submit --config=cloudbuild.yaml \
+     --substitutions=_OPENAI_SECRET=$OPENAI_SECRET,_API_SECRET=$API_SECRET,_ADMIN_SECRET=$ADMIN_SECRET,_ADMIN_USER=admin
+   ```
 3. Verify secret exists in Secret Manager:
    ```bash
    gcloud secrets list --filter="name:<admin-secret-name>"
+   ```
+4. After redeployment, verify admin is enabled (should return 401, not 404):
+   ```bash
+   curl -I https://<service-url>/admin/
+   # Expected: HTTP/2 401 (not 404)
    ```
 
 #### Issue: Admin Dashboard Returns 401 (Unauthorized)
