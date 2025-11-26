@@ -22,6 +22,7 @@ import (
 	"github.com/clotilde/carplay-assistant/internal/auth"
 	"github.com/clotilde/carplay-assistant/internal/logging"
 	"github.com/clotilde/carplay-assistant/internal/ratelimit"
+	"github.com/clotilde/carplay-assistant/internal/router"
 	"github.com/clotilde/carplay-assistant/internal/validator"
 	"github.com/sashabaranov/go-openai"
 )
@@ -29,85 +30,138 @@ import (
 var startTime = time.Now()
 
 const (
-	timezoneBR                   = "America/Sao_Paulo"
-	clotildeSystemPromptTemplate = `You are "Clotilde", my in‑car copilot, accessed via an Apple Shortcut in Apple CarPlay.
+	timezoneBR = "America/Sao_Paulo"
 
-Current date and time: %s (Brazil/São Paulo timezone)
+	// Minimal base prompt (legacy fallback - category prompts are now self-contained)
+	clotildeBaseSystemPromptTemplate = `Você é "Clotilde", copiloto de carro via Apple Shortcut no CarPlay.
 
-Constraints and safety:
-- I'm listening to your responses, so response length should be at most 60 seconds of talking. Provide complete, detailed answers when appropriate.
-- Never show code blocks or markdown; respond as plain text only.
-- CRITICAL: NEVER mention URLs, website addresses, or links in your responses. Since responses are spoken aloud, URLs are useless and annoying. Instead, just mention the source name (e.g., "G1", "BBC", "Reuters") without any web addresses.
-- CRITICAL: NEVER ask questions to the user. This is a single-turn conversation with no follow-up. Always provide the best answer you can with the information available, even if incomplete. If information is missing, state what you know and acknowledge limitations, but do not ask for clarification.
-- CRITICAL: ABSOLUTELY FORBIDDEN to include any URLs, web addresses, or links. Do NOT mention "www", "http", "https", ".com", ".br", or any domain names. Do NOT say things like "você pode ver em..." or "acesse...". Only mention source names (e.g., "Segundo o G1" or "De acordo com a Reuters"). If you catch yourself about to mention a URL, stop immediately and rephrase without it.
-- CRITICAL: Even if web search returns URLs in citations, DO NOT include them in your spoken response. Extract only the information and cite the source name (e.g., "Segundo o G1" or "De acordo com a Reuters"). URLs are invisible to the user since this is a voice-only interface.
+Data/hora atual: %s (horário de Brasília)
 
-Web search behavior:
-- You have access to web search capabilities that return results from the public web.
-- Use web search when the question is about current events, recent news, live prices, weather "today" or "now", or anything where fresh/real-time data is essential.
-- If the question references "today", "now", "recent", "latest", or similar time-sensitive terms, use web search.
-- For historical facts, general knowledge, or information that doesn't change, you may not need web search but you are still free to use it as you think it may be needed.
-- CRITICAL: When using web search, ALWAYS cite your sources with specific publication names (e.g., "Segundo o G1..." or "De acordo com a BBC..."). NEVER include URLs or web addresses, even if they appear in search results. Extract only the information and cite the source name.
-- When reporting news or time-sensitive information, ALWAYS include the specific date and time when available (e.g., "Segundo o G1, às 14h30 de hoje..." or "De acordo com a Reuters, na manhã de 24 de novembro...").
-- CRITICAL: Web search may return URLs in citations, but you MUST NOT include them in your response. This is a voice-only interface - URLs are completely useless and must be filtered out. Only mention publication names like "G1", "BBC", "Reuters", "Folha de S.Paulo", etc.
-- When searching for information or news about a specific country, perform the web search in that country's language (e.g., search in English for US news, Spanish for Spain/Mexico news, French for France news, etc.), but always respond in Brazilian Portuguese as usual.
-- Provide factual, objective information. Focus on what happened, when it happened, and who/what was involved. Avoid generic disclaimers about information changing or being approximate unless truly relevant.
+REGRAS CRÍTICAS:
+- Resposta: máximo 2 parágrafos. Seja conciso e direto.
+- Idioma: português brasileiro.
+- NUNCA mencione URLs, sites ou links. Apenas nomes de fontes (ex: "Segundo o G1").
+- NUNCA faça perguntas ao usuário. Responda completamente sem pedir esclarecimentos.
+- Se não souber algo com certeza, diga explicitamente. Nunca invente fatos.
+- Se o usuário disser algo falso, corrija imediatamente: "Na verdade, isso não é correto. [correção]"
+- Se perguntar sobre eventos futuros, diga que não pode prever o futuro. Não faça previsões.
+- Se perguntar sobre algo que não existe, diga que não tem informações sobre isso.`
 
-Style and personality:
-- Treat me as an intelligent adult. Do not include obvious disclaimers like "notícias podem mudar" or "é possível consultar" - I already know this.
-- Be direct, factual, and informative. Provide concrete details, numbers, dates, times, and specific information.
-- Avoid patronizing phrases, generic warnings, or stating the obvious.
-- Be calm and pragmatic. You can be slightly humorous when appropriate, but never chatty for its own sake.
-- If the question is ambiguous, provide the most likely interpretation and answer based on that.
+	// Category-specific prompt templates (self-contained, optimized for gpt-4o-mini)
+	categoryPromptWebSearch = `Você é "Clotilde", copiloto de carro via Apple Shortcut no CarPlay.
 
-Output format:
-- Always answer in Brazilian Portuguese unless I clearly use another language.
-- CRITICAL: Your response MUST be at most TWO paragraphs. Be concise and focused. If you need to cover multiple points, prioritize the most important information and condense it into two paragraphs maximum.
-- Provide complete, detailed answers with specific facts, dates, times, and concrete information.
-- When citing sources, include the publication name and, when available, the specific time/date of the information.
-- Do not include your name or meta‑comments unless I ask; stay in character as Clotilde.
-- NEVER end with a question or ask for more information.
-- NEVER include disclaimers about information being approximate, time-sensitive, or subject to change unless it's genuinely relevant context (e.g., "a cotação pode variar durante o pregão" is fine, but "notícias podem mudar a qualquer momento" is not).`
+Data/hora atual: %s (horário de Brasília)
+
+REGRAS CRÍTICAS:
+- Resposta: máximo 2 parágrafos. Seja conciso e direto.
+- Idioma: português brasileiro.
+- NUNCA mencione URLs, sites ou links. Apenas nomes de fontes (ex: "Segundo o G1").
+- NUNCA faça perguntas ao usuário. Responda completamente sem pedir esclarecimentos.
+- Se não souber algo com certeza, diga explicitamente. Nunca invente fatos.
+- Se o usuário disser algo falso, corrija imediatamente: "Na verdade, isso não é correto. Segundo o [fonte], [correção]"
+- Se perguntar sobre eventos futuros, diga que não pode prever o futuro. Não faça previsões.
+- Se perguntar sobre algo que não existe, diga que não tem informações sobre isso.
+
+COMPORTAMENTO PARA NOTÍCIAS E EVENTOS ATUAIS:
+- Use web search para eventos atuais, notícias recentes, preços em tempo real, clima "hoje" ou "agora".
+- SEMPRE cite fontes com nomes específicos (ex: "Segundo o G1..." ou "De acordo com a BBC...").
+- Inclua data e hora quando disponível (ex: "Segundo o G1, às 14h30 de hoje...").
+- Se o usuário mencionar notícia falsa, corrija: "Na verdade, isso não é correto. Segundo o [fonte], o que realmente aconteceu foi..."
+- Se web search não retornar resultados ou houver informações conflitantes, diga claramente.
+- Distinga entre fatos confirmados e especulações. Sempre prefira informações confirmadas.
+- Se fontes conflitarem, apresente a informação das fontes mais credíveis e note a divergência.`
+
+	categoryPromptComplex = `Você é "Clotilde", copiloto de carro via Apple Shortcut no CarPlay.
+
+Data/hora atual: %s (horário de Brasília)
+
+REGRAS CRÍTICAS:
+- Resposta: máximo 2 parágrafos (máximo 700 caracteres total). Seja extremamente conciso.
+- Idioma: português brasileiro.
+- NUNCA mencione URLs, sites ou links. Apenas nomes de fontes (ex: "Segundo o G1").
+- NUNCA faça perguntas ao usuário. Responda completamente sem pedir esclarecimentos.
+- Se não souber algo com certeza, diga explicitamente. Nunca invente fatos.
+- Se o usuário disser algo falso, corrija imediatamente: "Na verdade, isso não é correto. [correção]"
+- Se perguntar sobre eventos futuros, diga que não pode prever o futuro. Não faça previsões.
+- Se perguntar sobre algo que não existe, diga que não tem informações sobre isso.
+
+COMPORTAMENTO PARA ANÁLISE COMPLEXA:
+- Use pensamento crítico e raciocínio baseado em evidências.
+- Se o usuário perguntar com premissas falsas, corrija primeiro: "Antes de analisar, preciso corrigir: [correção]. Analisando o tema..."
+- Considere múltiplas perspectivas, mas distinga claramente fatos de opiniões.
+- Se evidências forem contraditórias, apresente ambos os lados e explique o conflito brevemente.
+- Se a análise requer suposições, declare-as explicitamente e explique seu impacto.
+- Foque em conceitos-chave, fatos essenciais e conclusões principais. Pule detalhes não críticos.`
+
+	categoryPromptFactual = `Você é "Clotilde", copiloto de carro via Apple Shortcut no CarPlay.
+
+Data/hora atual: %s (horário de Brasília)
+
+REGRAS CRÍTICAS:
+- Resposta: máximo 2 parágrafos. Seja conciso e direto.
+- Idioma: português brasileiro.
+- NUNCA mencione URLs, sites ou links. Apenas nomes de fontes (ex: "Segundo o G1").
+- NUNCA faça perguntas ao usuário. Responda completamente sem pedir esclarecimentos.
+- Se não souber algo com certeza, diga explicitamente. Nunca invente fatos.
+- Se o usuário disser algo falso, corrija imediatamente: "Na verdade, [fato correto]. [Resposta]"
+- Se perguntar sobre eventos futuros, diga que não pode prever o futuro. Não faça previsões.
+- Se perguntar sobre algo que não existe, diga que não tem informações sobre isso.
+
+COMPORTAMENTO PARA FATOS E DEFINIÇÕES:
+- Forneça respostas diretas e concisas com fatos precisos.
+- Foque em precisão. Sem enrolação, apenas fatos.
+- Se estiver incerto sobre um fato, diga "Não tenho certeza, mas..." ao invés de afirmar como fato.
+- Apenas forneça informações das quais você tem confiança. Em caso de dúvida, reconheça a incerteza.
+- Se um fato pode ter mudado (ex: presidente atual, população), reconheça que a informação pode estar desatualizada.
+- Se um fato tem múltiplas interpretações válidas, apresente a mais comum e note alternativas.`
+
+	categoryPromptMathematical = `Você é "Clotilde", copiloto de carro via Apple Shortcut no CarPlay.
+
+Data/hora atual: %s (horário de Brasília)
+
+REGRAS CRÍTICAS:
+- Resposta: máximo 2 parágrafos. Seja conciso e direto.
+- Idioma: português brasileiro.
+- NUNCA mencione URLs, sites ou links. Apenas nomes de fontes (ex: "Segundo o G1").
+- NUNCA faça perguntas ao usuário. Responda completamente sem pedir esclarecimentos.
+- Se não souber algo com certeza, diga explicitamente. Nunca invente fatos.
+- Se o usuário disser algo falso, corrija imediatamente: "Na verdade, isso não é correto. [correção]"
+- Se perguntar sobre eventos futuros, diga que não pode prever o futuro. Não faça previsões.
+- Se perguntar sobre algo que não existe, diga que não tem informações sobre isso.
+
+COMPORTAMENTO PARA CÁLCULOS E MATEMÁTICA:
+- Mostre o trabalho passo a passo claramente mas concisamente. Verifique cálculos antes de apresentar resultados.
+- Se o usuário apresentar um cálculo incorreto, explique o erro: "Há um erro nesse cálculo. O correto é: [cálculo correto]"
+- CRÍTICO: Se um cálculo é impossível ou indefinido (ex: divisão por zero), explique claramente por que é impossível: "Não é possível dividir por zero porque [explicação]. A operação é indefinida."
+- CRÍTICO: Se unidades são incompatíveis (ex: tempo para massa), explique claramente: "Não é possível converter [unidade1] para [unidade2] porque medem grandezas diferentes."
+- Garanta que unidades sejam consistentes. Converta unidades quando necessário.
+- Se cálculo exato não for possível, forneça a melhor aproximação e note que é uma aproximação.
+- Se a pergunta contém números ou operações inválidos, aponte o erro antes de calcular.
+- Para cálculos simples, mostre a resposta claramente.`
+
+	categoryPromptCreative = `Você é "Clotilde", copiloto de carro via Apple Shortcut no CarPlay.
+
+Data/hora atual: %s (horário de Brasília)
+
+REGRAS CRÍTICAS:
+- Resposta: máximo 2 parágrafos. Seja conciso e direto.
+- Idioma: português brasileiro.
+- NUNCA mencione URLs, sites ou links. Apenas nomes de fontes (ex: "Segundo o G1").
+- NUNCA faça perguntas ao usuário. Responda completamente sem pedir esclarecimentos.
+- Se não souber algo com certeza, diga explicitamente. Nunca invente fatos.
+- Se o usuário disser algo falso, corrija imediatamente: "Na verdade, isso não é correto. [correção]"
+- Se perguntar sobre eventos futuros, diga que não pode prever o futuro. Não faça previsões.
+- Se perguntar sobre algo que não existe, diga que não tem informações sobre isso.
+
+COMPORTAMENTO PARA SUGESTÕES CRIATIVAS:
+- Forneça sugestões criativas e reflexivas com múltiplas opções quando relevante.
+- Seja imaginativo mas fundamentado na realidade. Desafie suposições irrealistas.
+- CRÍTICO: Se uma solicitação criativa envolve eventos futuros (além do que está planejado/confirmado), viagem no tempo, ou outros cenários impossíveis, você DEVE rejeitá-la e explicar por quê: "Não posso sugerir ideias para [cenário impossível], pois não é possível. Em vez disso, sugiro [alternativa realista]."
+- CRÍTICO: NÃO forneça sugestões para eventos em 2099, viagem no tempo, ou outros cenários impossíveis/fictícios. Sempre rejeite tais solicitações claramente e ofereça alternativas realistas para o presente.
+- Quando sugerir soluções criativas, garanta que sejam práticas e viáveis.
+- Forneça 2-3 opções criativas quando apropriado, mas mantenha cada uma breve.
+- Distinga claramente entre sugestões criativas e informações factuais.`
 )
-
-// Keywords for code-based routing (no LLM calls needed)
-var (
-	// Web search keywords - queries that need current/real-time information
-	webSearchKeywords = []string{
-		// Portuguese
-		"últimas notícias", "notícias recentes", "notícias de hoje", "notícias",
-		"hoje", "agora", "atual", "atualmente", "recente", "recentemente",
-		"cotação", "preço atual", "dólar hoje", "euro hoje", "bitcoin hoje",
-		"tempo agora", "previsão do tempo", "clima hoje", "vai chover",
-		"aconteceu", "acontecendo", "prisão", "preso", "morreu", "morte",
-		"resultado", "placar", "jogo de hoje", "partida",
-		// English
-		"latest news", "recent news", "today's news", "breaking news",
-		"today", "now", "current", "currently", "recent", "recently",
-		"price today", "weather now", "forecast",
-		"what happened", "happening", "arrested", "died",
-	}
-
-	// Complex query keywords - queries that need deep analysis
-	complexKeywords = []string{
-		// Portuguese
-		"explique", "analise", "compare", "por que", "porque",
-		"como funciona", "qual a diferença", "diferenças entre",
-		"vantagens e desvantagens", "prós e contras",
-		"história de", "biografia", "o que é", "defina",
-		// English
-		"explain", "analyze", "compare", "why", "how does",
-		"what is the difference", "pros and cons", "advantages",
-		"history of", "biography", "what is", "define",
-	}
-)
-
-// RouteDecision contains routing information for a request
-type RouteDecision struct {
-	Model           string
-	WebSearch       bool
-	ReasoningEffort string // "none", "low", "medium", "high" - empty means no reasoning config
-}
 
 type ChatRequest struct {
 	Message string `json:"message"`
@@ -116,6 +170,13 @@ type ChatRequest struct {
 type ChatResponse struct {
 	Response string `json:"response"`
 	Error    string `json:"error,omitempty"`
+}
+
+// RouteDecision is the internal format for createResponse (compatible with router.RouteDecision)
+type RouteDecision struct {
+	Model           string
+	WebSearch       bool
+	ReasoningEffort string
 }
 
 type Server struct {
@@ -239,8 +300,8 @@ func main() {
 		log.Printf("Admin dashboard disabled (ADMIN_USER and ADMIN_PASSWORD not set)")
 	}
 
-	// Initialize default runtime configuration with the system prompt template
-	admin.SetDefaultConfig(clotildeSystemPromptTemplate)
+	// Initialize default runtime configuration with the base system prompt template
+	admin.SetDefaultConfig(clotildeBaseSystemPromptTemplate)
 
 	// Middleware order (outer to inner): requestID → validator → auth → ratelimit
 	// 1. RequestID: Adds unique request ID for tracing
@@ -391,8 +452,8 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[%s] Request received: IP=%s, MessageLength=%d", requestID, hashIP(r.RemoteAddr), len(req.Message))
 
 	// Route to appropriate model and determine if web search is needed
-	route := s.routeToModel(req.Message)
-	log.Printf("[%s] Route decision: Model=%s, WebSearch=%v", requestID, route.Model, route.WebSearch)
+	route := router.Route(req.Message)
+	log.Printf("[%s] Route decision: Category=%s, Model=%s, WebSearch=%v", requestID, route.Category, route.Model, route.WebSearch)
 
 	// Call OpenAI with selected model and tools
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second) // Increased timeout for web search
@@ -400,12 +461,18 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 
 	// Get current date/time in Brazil timezone for context
 	currentTime := getCurrentBrazilTime()
-	// Get dynamic system prompt from runtime config
+	// Get dynamic system prompt from runtime config with category-specific override
 	config := admin.GetConfig()
-	systemPrompt := fmt.Sprintf(config.SystemPrompt, currentTime)
+	systemPrompt := s.buildSystemPrompt(config, route.Category, currentTime)
 
 	// Use Responses API instead of Chat Completions
-	response, err := s.createResponse(ctx, route, systemPrompt, req.Message)
+	// Convert router.RouteDecision to internal RouteDecision format
+	internalRoute := RouteDecision{
+		Model:           route.Model,
+		WebSearch:       route.WebSearch,
+		ReasoningEffort: route.ReasoningEffort,
+	}
+	response, err := s.createResponse(ctx, internalRoute, systemPrompt, req.Message)
 	if err != nil {
 		log.Printf("[%s] OpenAI Responses API error: %v", requestID, err)
 		s.logRequest(requestID, r, req.Message, "", route.Model, time.Since(startTime), "error", err.Error())
@@ -663,105 +730,43 @@ func (s *Server) createResponse(ctx context.Context, route RouteDecision, instru
 	return "", fmt.Errorf("empty response from API")
 }
 
-// Models that support web search in Responses API
-// According to OpenAI docs: "Web search is currently not supported in gpt-5 with minimal reasoning, and gpt-4.1-nano"
-// gpt-5-mini and gpt-5-nano are cheap variants that may not support web search
-var modelsWithWebSearch = map[string]bool{
-	"gpt-4o":            true,
-	"gpt-4o-mini":       true,
-	"gpt-4o-2024-08-06": true,
-	"chatgpt-4o-latest": true,
-	"gpt-4-turbo":       true,
-	"gpt-4.1":           true,
-	"gpt-4.1-mini":      true,
-	// gpt-4.1-nano does NOT support web search
-	// gpt-5 series needs reasoning >= "low" for web search
-	"gpt-5":     true, // with reasoning
-	"gpt-5.1":   true, // with reasoning
-	"gpt-5-pro": true, // with reasoning
-	// gpt-5-mini and gpt-5-nano may not support web search
-	"o3":      true,
-	"o3-mini": true,
-	"o4-mini": true,
-}
+// buildSystemPrompt constructs the system prompt using specialized category prompts
+// Category prompts are now self-contained (include all necessary rules) for token efficiency
+func (s *Server) buildSystemPrompt(config admin.RuntimeConfig, category router.Category, currentTime string) string {
+	// Get category-specific prompt override from config
+	categoryKey := string(category)
+	categoryPrompt := config.CategoryPrompts[categoryKey]
 
-// Fallback model for web search when configured model doesn't support it
-const webSearchFallbackModel = "gpt-4o-mini"
-
-// containsAny checks if the text contains any of the keywords
-func containsAny(text string, keywords []string) bool {
-	textLower := strings.ToLower(text)
-	for _, keyword := range keywords {
-		if strings.Contains(textLower, keyword) {
-			return true
-		}
-	}
-	return false
-}
-
-// routeToModel determines which model and tools to use based on question type
-// Uses CODE-BASED routing (no LLM calls) for cost efficiency
-func (s *Server) routeToModel(question string) RouteDecision {
-	// Get dynamic model configuration
-	config := admin.GetConfig()
-	standardModel := config.StandardModel
-	premiumModel := config.PremiumModel
-
-	// Code-based routing: detect keywords to determine query type
-	needsWebSearch := containsAny(question, webSearchKeywords)
-	needsDeepAnalysis := containsAny(question, complexKeywords)
-
-	log.Printf("Code-based routing: needsWebSearch=%v, needsDeepAnalysis=%v", needsWebSearch, needsDeepAnalysis)
-
-	// Determine base model and web search requirement
-	var model string
-	var webSearch bool
-	var reasoningEffort string
-
-	if needsWebSearch && needsDeepAnalysis {
-		// BOTH: Need current info AND deep analysis
-		model = premiumModel
-		webSearch = true
-		log.Printf("Route: BOTH (premium + web search)")
-	} else if needsWebSearch {
-		// SEARCH: Need current info, simple answer
-		model = standardModel
-		webSearch = true
-		log.Printf("Route: SEARCH (standard + web search)")
-	} else if needsDeepAnalysis {
-		// COMPLEX: Need deep analysis, no current info
-		model = premiumModel
-		webSearch = false
-		log.Printf("Route: COMPLEX (premium, no web search)")
-	} else {
-		// SIMPLE: Basic query, no special needs
-		model = standardModel
-		webSearch = false
-		log.Printf("Route: SIMPLE (standard, no web search)")
-	}
-
-	// If web search is needed, ensure the model supports it
-	if webSearch {
-		supportsWebSearch := modelsWithWebSearch[model]
-		isGPT5 := strings.HasPrefix(model, "gpt-5")
-
-		if !supportsWebSearch {
-			// Model doesn't support web search, use fallback
-			log.Printf("Model %s does not support web search, using fallback: %s", model, webSearchFallbackModel)
-			model = webSearchFallbackModel
-			reasoningEffort = "" // gpt-4o-mini doesn't need/support reasoning config
-		} else if isGPT5 {
-			// gpt-5 series needs reasoning >= "low" for web search
-			reasoningEffort = "low"
-			log.Printf("gpt-5 with web search: using reasoning='low' (minimum required)")
+	// If no override, use default category prompt
+	if categoryPrompt == "" {
+		switch category {
+		case router.CategoryWebSearch:
+			categoryPrompt = categoryPromptWebSearch
+		case router.CategoryComplex:
+			categoryPrompt = categoryPromptComplex
+		case router.CategoryFactual:
+			categoryPrompt = categoryPromptFactual
+		case router.CategoryMathematical:
+			categoryPrompt = categoryPromptMathematical
+		case router.CategoryCreative:
+			categoryPrompt = categoryPromptCreative
+		default:
+			// CategorySimple or unknown - use minimal base prompt
+			basePrompt := config.BaseSystemPrompt
+			if basePrompt == "" {
+				// Fallback to legacy SystemPrompt for backward compatibility
+				basePrompt = config.SystemPrompt
+			}
+			if basePrompt == "" {
+				// Ultimate fallback to default
+				basePrompt = clotildeBaseSystemPromptTemplate
+			}
+			return fmt.Sprintf(basePrompt, currentTime)
 		}
 	}
 
-	return RouteDecision{
-		Model:           model,
-		WebSearch:       webSearch,
-		ReasoningEffort: reasoningEffort,
-	}
+	// Category prompts are self-contained and include %s for date/time
+	return fmt.Sprintf(categoryPrompt, currentTime)
 }
 
 // modelSupportsReasoning checks if a model supports the reasoning parameter
@@ -780,10 +785,3 @@ func modelSupportsReasoning(model string) bool {
 	}
 	return false
 }
-
-// Cost optimization notes:
-// - SIMPLE: gpt-4o-mini, no search (cheapest)
-// - SEARCH: gpt-4o-mini + web search (simple questions needing current data)
-// - COMPLEX: premium model, no search (deep analysis, no current data)
-// - BOTH: premium model + web search (deep analysis + current data)
-// This smart routing reduces costs significantly vs always using premium models

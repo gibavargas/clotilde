@@ -19,32 +19,28 @@ steps:
 
   # Deploy to Cloud Run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-    entrypoint: gcloud
+    entrypoint: bash
     args:
-      - 'run'
-      - 'deploy'
-      - '${_SERVICE_NAME}'
-      - '--image'
-      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/${_SERVICE_NAME}:latest'
-      - '--region'
-      - '${_REGION}'
-      - '--platform'
-      - 'managed'
-      - '--allow-unauthenticated'
-      - '--memory'
-      - '256Mi'
-      - '--cpu'
-      - '1'
-      - '--min-instances'
-      - '0'
-      - '--max-instances'
-      - '5'
-      - '--timeout'
-      - '60'
-      - '--set-env-vars'
-      - 'GOOGLE_CLOUD_PROJECT=${PROJECT_ID},ADMIN_USER=${_ADMIN_USER},LOG_BUFFER_SIZE=${_LOG_BUFFER_SIZE}'
-      - '--set-secrets'
-      - 'OPENAI_KEY_SECRET_NAME=${_OPENAI_SECRET}:latest,API_KEY_SECRET_NAME=${_API_SECRET}:latest,ADMIN_PASSWORD=${_ADMIN_SECRET}:latest'
+      - '-c'
+      - |
+        ENV_VARS="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},LOG_BUFFER_SIZE=${_LOG_BUFFER_SIZE}"
+        [ -n "${_ADMIN_USER}" ] && ENV_VARS="$${ENV_VARS},ADMIN_USER=${_ADMIN_USER}"
+        
+        SECRETS="OPENAI_KEY_SECRET_NAME=${_OPENAI_SECRET}:latest,API_KEY_SECRET_NAME=${_API_SECRET}:latest"
+        [ -n "${_ADMIN_SECRET}" ] && SECRETS="$${SECRETS},ADMIN_PASSWORD=${_ADMIN_SECRET}:latest"
+        
+        gcloud run deploy ${_SERVICE_NAME} \
+          --image ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/${_SERVICE_NAME}:latest \
+          --region ${_REGION} \
+          --platform managed \
+          --allow-unauthenticated \
+          --memory 256Mi \
+          --cpu 1 \
+          --min-instances 0 \
+          --max-instances 5 \
+          --timeout 60 \
+          --set-env-vars "$${ENV_VARS}" \
+          --set-secrets "$${SECRETS}"
     id: 'deploy-cloud-run'
     waitFor: ['push-image']
 

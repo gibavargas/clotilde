@@ -277,6 +277,16 @@ const dashboardHTML = `<!DOCTYPE html>
             text-transform: uppercase;
         }
 
+        .badge-model {
+            text-transform: none;
+            font-size: 12px;
+            font-family: var(--font-mono);
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
         .badge-success {
             background: rgba(63, 185, 80, 0.15);
             color: var(--accent-green);
@@ -719,12 +729,44 @@ const dashboardHTML = `<!DOCTYPE html>
             </div>
 
             <div class="form-group">
-                <label class="form-label">System Prompt Template</label>
-                <textarea class="form-control textarea-editor" id="systemPrompt" spellcheck="false"></textarea>
+                <label class="form-label">Base System Prompt (Core Principles)</label>
+                <textarea class="form-control textarea-editor" id="baseSystemPrompt" spellcheck="false"></textarea>
                 <div class="stat-subtitle" style="margin-top: 8px;">
-                    Use <code>%s</code> as a placeholder for the current date/time.
+                    Core principles shared by all categories. Use <code>%s</code> as a placeholder for the current date/time.
                 </div>
             </div>
+            
+            <div class="form-group" style="margin-top: 24px;">
+                <label class="form-label" style="font-size: 16px; font-weight: 600; margin-bottom: 16px;">Category-Specific Prompts (Optional Overrides)</label>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                    <div class="form-group">
+                        <label class="form-label">Web Search (Time-Sensitive)</label>
+                        <textarea class="form-control textarea-editor" id="categoryPromptWebSearch" spellcheck="false" style="min-height: 120px;"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Complex Analysis</label>
+                        <textarea class="form-control textarea-editor" id="categoryPromptComplex" spellcheck="false" style="min-height: 120px;"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Factual Lookup</label>
+                        <textarea class="form-control textarea-editor" id="categoryPromptFactual" spellcheck="false" style="min-height: 120px;"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Mathematical</label>
+                        <textarea class="form-control textarea-editor" id="categoryPromptMathematical" spellcheck="false" style="min-height: 120px;"></textarea>
+                    </div>
+                    <div class="form-group" style="grid-column: 1 / -1;">
+                        <label class="form-label">Creative/Open-ended</label>
+                        <textarea class="form-control textarea-editor" id="categoryPromptCreative" spellcheck="false" style="min-height: 120px;"></textarea>
+                    </div>
+                </div>
+                <div class="stat-subtitle" style="margin-top: 8px;">
+                    Leave empty to use default category prompts. These are appended to the base prompt.
+                </div>
+            </div>
+            
+            <!-- Legacy support: hidden field for backward compatibility -->
+            <input type="hidden" id="systemPrompt" value="">
         </div>
 
         <div id="toast" class="toast"></div>
@@ -902,9 +944,11 @@ const dashboardHTML = `<!DOCTYPE html>
                         <td>${formatTime(entry.timestamp)}</td>
                         <td class="request-id">${safeId}</td>
                         <td>
-                            <span class="badge ${entry.model && entry.model.includes('mini') ? 'badge-nano' : 'badge-full'}">
-                                ${entry.model && entry.model.includes('mini') ? 'Mini' : 'Full'}
-                            </span>
+                            ${entry.model ? ` + "`" + `
+                                <span class="badge badge-model ${entry.model.includes('mini') || entry.model.includes('nano') ? 'badge-nano' : 'badge-full'}" title="${escapeHtml(entry.model)}">
+                                    ${escapeHtml(entry.model)}
+                                </span>
+                            ` + "`" + ` : '<span style="color: var(--text-secondary); font-size: 11px;">N/A</span>'}
                         </td>
                         <td>${entry.response_time_ms}ms</td>
                         <td>
@@ -1033,9 +1077,33 @@ const dashboardHTML = `<!DOCTYPE html>
                 
                 const config = await response.json();
                 
-                if (config.system_prompt) {
-                    document.getElementById('systemPrompt').value = config.system_prompt;
+                // Load base system prompt (prefer base_system_prompt, fallback to system_prompt for legacy)
+                const basePrompt = config.base_system_prompt || config.system_prompt || '';
+                if (basePrompt) {
+                    document.getElementById('baseSystemPrompt').value = basePrompt;
+                    // Legacy support
+                    document.getElementById('systemPrompt').value = basePrompt;
                 }
+                
+                // Load category prompts
+                if (config.category_prompts) {
+                    if (config.category_prompts.web_search) {
+                        document.getElementById('categoryPromptWebSearch').value = config.category_prompts.web_search;
+                    }
+                    if (config.category_prompts.complex) {
+                        document.getElementById('categoryPromptComplex').value = config.category_prompts.complex;
+                    }
+                    if (config.category_prompts.factual) {
+                        document.getElementById('categoryPromptFactual').value = config.category_prompts.factual;
+                    }
+                    if (config.category_prompts.mathematical) {
+                        document.getElementById('categoryPromptMathematical').value = config.category_prompts.mathematical;
+                    }
+                    if (config.category_prompts.creative) {
+                        document.getElementById('categoryPromptCreative').value = config.category_prompts.creative;
+                    }
+                }
+                
                 if (config.standard_model) {
                     document.getElementById('standardModel').value = config.standard_model;
                 }
@@ -1058,10 +1126,32 @@ const dashboardHTML = `<!DOCTYPE html>
             btnText.style.display = 'none';
             spinner.style.display = 'block';
             
+            // Build config with base prompt and category prompts
+            const basePrompt = document.getElementById('baseSystemPrompt').value;
+            const categoryPrompts = {};
+            
+            const webSearchPrompt = document.getElementById('categoryPromptWebSearch').value.trim();
+            if (webSearchPrompt) categoryPrompts.web_search = webSearchPrompt;
+            
+            const complexPrompt = document.getElementById('categoryPromptComplex').value.trim();
+            if (complexPrompt) categoryPrompts.complex = complexPrompt;
+            
+            const factualPrompt = document.getElementById('categoryPromptFactual').value.trim();
+            if (factualPrompt) categoryPrompts.factual = factualPrompt;
+            
+            const mathematicalPrompt = document.getElementById('categoryPromptMathematical').value.trim();
+            if (mathematicalPrompt) categoryPrompts.mathematical = mathematicalPrompt;
+            
+            const creativePrompt = document.getElementById('categoryPromptCreative').value.trim();
+            if (creativePrompt) categoryPrompts.creative = creativePrompt;
+            
             const config = {
-                system_prompt: document.getElementById('systemPrompt').value,
+                base_system_prompt: basePrompt,
+                category_prompts: Object.keys(categoryPrompts).length > 0 ? categoryPrompts : undefined,
                 standard_model: document.getElementById('standardModel').value,
-                premium_model: document.getElementById('premiumModel').value
+                premium_model: document.getElementById('premiumModel').value,
+                // Legacy support
+                system_prompt: basePrompt
             };
             
             try {

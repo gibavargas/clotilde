@@ -10,17 +10,24 @@ import (
 
 // RuntimeConfig holds runtime configuration that can be changed via admin UI
 type RuntimeConfig struct {
-	SystemPrompt  string `json:"system_prompt"`
-	StandardModel string `json:"standard_model"` // Fast/cheap model (e.g., gpt-4o-mini)
-	PremiumModel  string `json:"premium_model"`  // Powerful model (e.g., gpt-4.1)
+	BaseSystemPrompt string            `json:"base_system_prompt"`    // Core principles (shared by all)
+	CategoryPrompts  map[string]string `json:"category_prompts"`      // category -> prompt override (optional)
+	StandardModel    string            `json:"standard_model"`        // Fast/cheap model (e.g., gpt-4o-mini)
+	PremiumModel     string            `json:"premium_model"`         // Powerful model (e.g., gpt-4.1)
+	CategoryModels   map[string]string `json:"category_models"`       // category -> model override (optional)
+	
+	// Legacy field for backward compatibility
+	SystemPrompt string `json:"system_prompt,omitempty"`
 }
 
 var (
 	configMutex sync.RWMutex
 	runtimeConfig = RuntimeConfig{
-		SystemPrompt:  "", // Will be initialized with default from main.go
-		StandardModel: "gpt-4o-mini",
-		PremiumModel:  "gpt-4o", // Default to gpt-4o which is confirmed working
+		BaseSystemPrompt: "", // Will be initialized with default from main.go
+		CategoryPrompts:  make(map[string]string),
+		CategoryModels:   make(map[string]string),
+		StandardModel:    "gpt-4o-mini",
+		PremiumModel:     "gpt-4o-mini", // Default to gpt-4o-mini for cost efficiency
 	}
 	initialized = false
 )
@@ -32,6 +39,8 @@ func SetDefaultConfig(defaultSystemPrompt string) {
 	defer configMutex.Unlock()
 	
 	if !initialized {
+		runtimeConfig.BaseSystemPrompt = defaultSystemPrompt
+		// Legacy support
 		runtimeConfig.SystemPrompt = defaultSystemPrompt
 		initialized = true
 	}
@@ -42,10 +51,25 @@ func GetConfig() RuntimeConfig {
 	configMutex.RLock()
 	defer configMutex.RUnlock()
 	
+	// Deep copy maps
+	categoryPrompts := make(map[string]string)
+	for k, v := range runtimeConfig.CategoryPrompts {
+		categoryPrompts[k] = v
+	}
+	
+	categoryModels := make(map[string]string)
+	for k, v := range runtimeConfig.CategoryModels {
+		categoryModels[k] = v
+	}
+	
 	return RuntimeConfig{
-		SystemPrompt:  runtimeConfig.SystemPrompt,
-		StandardModel: runtimeConfig.StandardModel,
-		PremiumModel:  runtimeConfig.PremiumModel,
+		BaseSystemPrompt: runtimeConfig.BaseSystemPrompt,
+		CategoryPrompts:  categoryPrompts,
+		CategoryModels:   categoryModels,
+		StandardModel:    runtimeConfig.StandardModel,
+		PremiumModel:     runtimeConfig.PremiumModel,
+		// Legacy support
+		SystemPrompt: runtimeConfig.BaseSystemPrompt,
 	}
 }
 
@@ -67,7 +91,7 @@ func validateSystemPrompt(prompt string) error {
 		return &ConfigError{Field: "system_prompt", Message: "System prompt must contain exactly one %s placeholder for date/time"}
 	}
 	if placeholderCount > 1 {
-		return &ConfigError{Field: "system_prompt", Message: fmt.Sprintf("System prompt must contain exactly one %s placeholder (found %d)", placeholderCount)}
+		return &ConfigError{Field: "system_prompt", Message: fmt.Sprintf("System prompt must contain exactly one %%s placeholder (found %d)", placeholderCount)}
 	}
 	
 	// Check for potentially dangerous format strings (but allow %s)
@@ -127,15 +151,71 @@ func SetConfig(newConfig RuntimeConfig) error {
 		return &ConfigError{Field: "premium_model", Message: "Invalid premium model"}
 	}
 	
-	// Validate system prompt content
-	if err := validateSystemPrompt(newConfig.SystemPrompt); err != nil {
-		return err
+	// Determine which prompt to validate (prefer BaseSystemPrompt, fallback to SystemPrompt for legacy)
+	promptToValidate := newConfig.BaseSystemPrompt
+	if promptToValidate == "" {
+		promptToValidate = newConfig.SystemPrompt
+	}
+	
+	// Validate base system prompt content (must have %s placeholder)
+	if promptToValidate != "" {
+		if err := validateSystemPrompt(promptToValidate); err != nil {
+			return err
+		}
+	} else {
+		// Base prompt is required
+		return &ConfigError{Field: "base_system_prompt", Message: "Base system prompt is required"}
+	}
+	
+	// Validate category prompts if provided
+	for category, prompt := range newConfig.CategoryPrompts {
+		if prompt != "" {
+			// Category prompts don't need %s placeholder (they're appended to base)
+			// But still check for null bytes and UTF-8
+			if bytes.Contains([]byte(prompt), []byte{0}) {
+				return &ConfigError{Field: "category_prompts." + category, Message: "Category prompt contains null bytes"}
+			}
+			if !utf8.ValidString(prompt) {
+				return &ConfigError{Field: "category_prompts." + category, Message: "Category prompt contains invalid UTF-8"}
+			}
+		}
+	}
+	
+	// Validate category models if provided
+	for category, model := range newConfig.CategoryModels {
+		if !validModels[model] {
+			return &ConfigError{Field: "category_models." + category, Message: "Invalid model for category"}
+		}
 	}
 	
 	configMutex.Lock()
 	defer configMutex.Unlock()
 	
-	runtimeConfig.SystemPrompt = newConfig.SystemPrompt
+	// Update base prompt (prefer BaseSystemPrompt, fallback to SystemPrompt for legacy)
+	if newConfig.BaseSystemPrompt != "" {
+		runtimeConfig.BaseSystemPrompt = newConfig.BaseSystemPrompt
+		runtimeConfig.SystemPrompt = newConfig.BaseSystemPrompt // Legacy support
+	} else if newConfig.SystemPrompt != "" {
+		runtimeConfig.BaseSystemPrompt = newConfig.SystemPrompt
+		runtimeConfig.SystemPrompt = newConfig.SystemPrompt
+	}
+	
+	// Update category prompts
+	if newConfig.CategoryPrompts != nil {
+		runtimeConfig.CategoryPrompts = make(map[string]string)
+		for k, v := range newConfig.CategoryPrompts {
+			runtimeConfig.CategoryPrompts[k] = v
+		}
+	}
+	
+	// Update category models
+	if newConfig.CategoryModels != nil {
+		runtimeConfig.CategoryModels = make(map[string]string)
+		for k, v := range newConfig.CategoryModels {
+			runtimeConfig.CategoryModels[k] = v
+		}
+	}
+	
 	runtimeConfig.StandardModel = newConfig.StandardModel
 	runtimeConfig.PremiumModel = newConfig.PremiumModel
 	

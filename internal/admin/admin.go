@@ -725,11 +725,24 @@ func (h *Handler) HandleSetConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate system prompt size
-	if len(newConfig.SystemPrompt) > maxSystemPromptSize {
-		h.logAdminAction("config_update_failed", ip, "System prompt too large")
-		http.Error(w, "System prompt exceeds maximum size", http.StatusBadRequest)
+	// Validate base system prompt size (prefer BaseSystemPrompt, fallback to SystemPrompt for legacy)
+	basePrompt := newConfig.BaseSystemPrompt
+	if basePrompt == "" {
+		basePrompt = newConfig.SystemPrompt
+	}
+	if basePrompt != "" && len(basePrompt) > maxSystemPromptSize {
+		h.logAdminAction("config_update_failed", ip, "Base system prompt too large")
+		http.Error(w, "Base system prompt exceeds maximum size", http.StatusBadRequest)
 		return
+	}
+	
+	// Validate category prompts size
+	for category, prompt := range newConfig.CategoryPrompts {
+		if prompt != "" && len(prompt) > maxSystemPromptSize {
+			h.logAdminAction("config_update_failed", ip, fmt.Sprintf("Category prompt %s too large", category))
+			http.Error(w, fmt.Sprintf("Category prompt %s exceeds maximum size", category), http.StatusBadRequest)
+			return
+		}
 	}
 
 	if err := SetConfig(newConfig); err != nil {
