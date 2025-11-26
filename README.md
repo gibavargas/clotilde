@@ -93,39 +93,31 @@ gcloud secrets add-iam-policy-binding $API_SECRET \
 
 ### 2. Build and Deploy
 
-#### Option A: Using Cloud Build (Recommended)
+#### Option A: Using deploy.sh (Recommended)
+
+```bash
+# Set required environment variables
+export OPENAI_SECRET=your-openai-secret-name
+export API_SECRET=your-api-secret-name
+
+# Optional: Enable admin dashboard
+export ADMIN_USER=admin
+export ADMIN_SECRET=your-admin-password-secret-name
+export LOG_BUFFER_SIZE=1000
+
+# Deploy
+chmod +x deploy.sh
+./deploy.sh
+```
+
+#### Option B: Using Cloud Build (Deprecated)
+
+> **Note**: Cloud Build is deprecated in favor of the local `deploy.sh` script. This option is kept for reference but is not recommended for new deployments.
 
 ```bash
 # Submit build (use your secret names from the setup step)
 gcloud builds submit --config=cloudbuild.yaml \
     --substitutions=_REGION=$REGION,_REPO_NAME=$REPO_NAME,_SERVICE_NAME=clotilde,_OPENAI_SECRET=$OPENAI_SECRET,_API_SECRET=$API_SECRET
-```
-
-#### Option B: Manual Build and Deploy
-
-```bash
-# Build Docker image
-docker build -t $REGION-docker.pkg.dev/$PROJECT_ID/$REPO_NAME/clotilde:latest .
-
-# Configure Docker authentication
-gcloud auth configure-docker $REGION-docker.pkg.dev
-
-# Push to Artifact Registry
-docker push $REGION-docker.pkg.dev/$PROJECT_ID/$REPO_NAME/clotilde:latest
-
-# Deploy to Cloud Run
-gcloud run deploy clotilde \
-    --image $REGION-docker.pkg.dev/$PROJECT_ID/$REPO_NAME/clotilde:latest \
-    --region $REGION \
-    --platform managed \
-    --allow-unauthenticated \
-    --memory 256Mi \
-    --cpu 1 \
-    --min-instances 0 \
-    --max-instances 10 \
-    --timeout 30 \
-    --set-env-vars GOOGLE_CLOUD_PROJECT=$PROJECT_ID,PORT=8080 \
-    --set-secrets OPENAI_KEY_SECRET_NAME=$OPENAI_SECRET:latest,API_KEY_SECRET_NAME=$API_SECRET:latest
 ```
 
 ### 3. Get Your Service URL

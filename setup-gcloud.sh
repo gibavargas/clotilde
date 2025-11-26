@@ -47,8 +47,7 @@ echo "Enabling required APIs..."
 gcloud services enable \
     artifactregistry.googleapis.com \
     secretmanager.googleapis.com \
-    run.googleapis.com \
-    cloudbuild.googleapis.com
+    run.googleapis.com
 
 # Create Artifact Registry repository
 echo "Creating Artifact Registry repository..."
@@ -125,6 +124,5 @@ echo "Setup complete!"
 echo ""
 echo "Next steps:"
 echo "1. Build and deploy: ./deploy.sh"
-echo "2. Or use Cloud Build: gcloud builds submit --config=cloudbuild.yaml"
-echo "3. Get service URL: gcloud run services describe $SERVICE_NAME --region $REGION --format='value(status.url)'"
+echo "2. Get service URL: gcloud run services describe $SERVICE_NAME --region $REGION --format='value(status.url)'"
 

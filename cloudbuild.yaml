@@ -1,3 +1,16 @@
+# DEPRECATED: This Cloud Build configuration is kept for reference only.
+# The recommended deployment method is to use the local deploy.sh script.
+# See README.md for the current deployment instructions.
+#
+# To use this file (not recommended):
+#   gcloud builds submit --config=cloudbuild.yaml \
+#     --substitutions=_OPENAI_SECRET=<secret-name>,_API_SECRET=<secret-name>
+#
+# Recommended method:
+#   export OPENAI_SECRET=<secret-name>
+#   export API_SECRET=<secret-name>
+#   ./deploy.sh
+
 steps:
   # Build the Docker image
   - name: 'gcr.io/cloud-builders/docker'

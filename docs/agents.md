@@ -477,17 +477,17 @@ go run cmd/clotilde/main.go
 
 ### Deployment Workflow
 
-**Cloud Build** (recommended):
-```bash
-gcloud builds submit --config=cloudbuild.yaml \
-  --substitutions=_OPENAI_SECRET=clotilde-oai-abc123,_API_SECRET=clotilde-auth-xyz789
-```
-
-**Manual Deploy**:
+**deploy.sh** (recommended):
 ```bash
 export OPENAI_SECRET=clotilde-oai-abc123
 export API_SECRET=clotilde-auth-xyz789
 ./deploy.sh
+```
+
+**Cloud Build** (deprecated):
+```bash
+gcloud builds submit --config=cloudbuild.yaml \
+  --substitutions=_OPENAI_SECRET=clotilde-oai-abc123,_API_SECRET=clotilde-auth-xyz789
 ```
 
 ### Security Benefits
@@ -521,7 +521,7 @@ After implementing this feature, verify:
 
 - [ ] Application fails with clear error if `OPENAI_SECRET_NAME` not set (local dev)
 - [ ] Application fails with clear error if `API_SECRET_NAME` not set (local dev)
-- [ ] Cloud Build deployment works with `--substitutions` provided
+- [ ] deploy.sh deployment works with environment variables provided
 - [ ] Deploy script fails if `OPENAI_SECRET` or `API_SECRET` not set
 - [ ] Migration script creates secrets with unique names
 - [ ] IAM permissions granted correctly
@@ -1452,7 +1452,7 @@ func Normalize(text string) string {
 
 ### Overview
 
-**Purpose**: This section teaches AI agents how to correctly deploy the Clotilde service to Google Cloud Run using Cloud Build, ensuring all required secrets and environment variables are properly configured.
+**Purpose**: This section teaches AI agents how to correctly deploy the Clotilde service to Google Cloud Run using the local `deploy.sh` script, ensuring all required secrets and environment variables are properly configured.
 
 **Critical**: Never commit actual secret names or values to the repository. Always use placeholders in documentation.
 
@@ -1464,11 +1464,12 @@ Before deploying, ensure you have:
 
 1. **Google Cloud Project** configured
 2. **Secret Manager secrets** created:
-   - OpenAI API key secret (name stored in `_OPENAI_SECRET` substitution)
-   - API authentication key secret (name stored in `_API_SECRET` substitution)
-   - Admin password secret (optional, name stored in `_ADMIN_SECRET` substitution)
-3. **Artifact Registry** repository created (name in `cloudbuild.yaml` substitutions)
-4. **Cloud Build** service account has necessary permissions
+   - OpenAI API key secret (name stored in `OPENAI_SECRET` environment variable)
+   - API authentication key secret (name stored in `API_SECRET` environment variable)
+   - Admin password secret (optional, name stored in `ADMIN_SECRET` environment variable)
+3. **Artifact Registry** repository created (default: `clotilde-repo`)
+4. **Docker** installed locally for building images
+5. **gcloud CLI** authenticated and configured
 
 ---
 
@@ -1477,8 +1478,8 @@ Before deploying, ensure you have:
 **CRITICAL**: All deployments MUST include the admin dashboard. This is the standard deployment method.
 
 **Requirements**:
-- Admin username (set via `_ADMIN_USER` substitution) - **REQUIRED**
-- Admin password secret (name stored in `_ADMIN_SECRET` substitution) - **REQUIRED**
+- Admin username (set via `ADMIN_USER` environment variable) - **REQUIRED**
+- Admin password secret (name stored in `ADMIN_SECRET` environment variable) - **REQUIRED**
 
 **Command**:
 ```bash
@@ -1487,12 +1488,19 @@ OPENAI_SECRET=$(gcloud secrets list --format="value(name)" | grep -iE "openai|oa
 API_SECRET=$(gcloud secrets list --format="value(name)" | grep -E "clotilde-api-key|api-key" | head -1)
 ADMIN_SECRET=$(gcloud secrets list --format="value(name)" | grep -i admin | head -1)
 
+# Set environment variables
+export OPENAI_SECRET=$OPENAI_SECRET
+export API_SECRET=$API_SECRET
+export ADMIN_SECRET=$ADMIN_SECRET
+export ADMIN_USER=admin
+export LOG_BUFFER_SIZE=1000
+
 # Deploy with admin dashboard enabled
-gcloud builds submit --config=cloudbuild.yaml \
-  --substitutions=_OPENAI_SECRET=$OPENAI_SECRET,_API_SECRET=$API_SECRET,_ADMIN_SECRET=$ADMIN_SECRET,_ADMIN_USER=admin
+chmod +x deploy.sh
+./deploy.sh
 ```
 
-**⚠️ IMPORTANT**: If `_ADMIN_USER` or `_ADMIN_SECRET` are not provided, the admin dashboard will return 404 (not found) because routes won't be registered.
+**⚠️ IMPORTANT**: If `ADMIN_USER` or `ADMIN_SECRET` are not provided, the admin dashboard will return 404 (not found) because routes won't be registered.
 
 **What this does**:
 - Builds Docker image from current directory
@@ -1543,8 +1551,13 @@ gcloud run services describe clotilde --region=us-central1 \
 
 **Command**:
 ```bash
-gcloud builds submit --config=cloudbuild.yaml \
-  --substitutions=_OPENAI_SECRET=<openai-secret-name>,_API_SECRET=<api-secret-name>
+# Set required environment variables (no admin variables)
+export OPENAI_SECRET=<openai-secret-name>
+export API_SECRET=<api-secret-name>
+
+# Deploy without admin dashboard
+chmod +x deploy.sh
+./deploy.sh
 ```
 
 **What this does**:
@@ -1562,25 +1575,30 @@ curl -I https://<service-url>/admin/
 
 ---
 
-### Understanding cloudbuild.yaml Substitutions
+### Understanding deploy.sh Environment Variables
 
-The `cloudbuild.yaml` file uses substitution variables that **must** be provided at deploy time:
+The `deploy.sh` script uses environment variables that **must** be provided at deploy time:
 
-**Required Substitutions**:
-- `_OPENAI_SECRET`: Name of Secret Manager secret containing OpenAI API key name
-- `_API_SECRET`: Name of Secret Manager secret containing API authentication key name
+**Required Environment Variables**:
+- `OPENAI_SECRET`: Name of Secret Manager secret containing OpenAI API key
+- `API_SECRET`: Name of Secret Manager secret containing API authentication key
 
-**Required Substitutions** (for standard deployment):
-- `_ADMIN_SECRET`: Name of Secret Manager secret containing admin password (required for admin UI)
-- `_ADMIN_USER`: Admin username string (required for admin UI)
+**Required Environment Variables** (for standard deployment):
+- `ADMIN_SECRET`: Name of Secret Manager secret containing admin password (required for admin UI)
+- `ADMIN_USER`: Admin username string (required for admin UI)
 
-**Optional Substitutions**:
-- `_LOG_BUFFER_SIZE`: Max log entries in memory (default: 1000)
-- `_REGION`: Cloud Run region (default: us-central1)
-- `_REPO_NAME`: Artifact Registry repository name (default: clotilde-repo)
-- `_SERVICE_NAME`: Cloud Run service name (default: clotilde)
+**Optional Environment Variables**:
+- `LOG_BUFFER_SIZE`: Max log entries in memory (default: 1000)
+- `REGION`: Cloud Run region (default: us-central1)
+- `REPO_NAME`: Artifact Registry repository name (default: clotilde-repo)
+- `SERVICE_NAME`: Cloud Run service name (default: clotilde)
+- `IMAGE_TAG`: Docker image tag (default: latest)
+- `GOOGLE_CLOUD_PROJECT`: Google Cloud project ID (default: from gcloud config)
 
-**Critical**: The substitution variables contain **secret names**, not secret values. The actual secret values are stored in Secret Manager and mounted at runtime.
+**Critical**: The environment variables contain **secret names**, not secret values. The actual secret values are stored in Secret Manager and mounted at runtime.
+
+**Alternative: Cloud Build** (Deprecated):
+> The `cloudbuild.yaml` file is kept for reference but is deprecated. It uses substitution variables (e.g., `_OPENAI_SECRET`) instead of environment variables. Use `deploy.sh` for new deployments.
 
 ---
 
@@ -1637,16 +1655,19 @@ func (h *Handler) IsEnabled() bool {
    gcloud run services describe clotilde --region=us-central1 \
      --format="get(spec.template.spec.containers[0].env)" | grep ADMIN
    ```
-2. If missing, redeploy with `_ADMIN_SECRET` and `_ADMIN_USER` substitutions:
+2. If missing, redeploy with `ADMIN_SECRET` and `ADMIN_USER` environment variables:
    ```bash
    # Get secret names
    OPENAI_SECRET=$(gcloud secrets list --format="value(name)" | grep -iE "openai|oai" | head -1)
    API_SECRET=$(gcloud secrets list --format="value(name)" | grep -E "clotilde-api-key|api-key" | head -1)
    ADMIN_SECRET=$(gcloud secrets list --format="value(name)" | grep -i admin | head -1)
    
-   # Redeploy with admin enabled
-   gcloud builds submit --config=cloudbuild.yaml \
-     --substitutions=_OPENAI_SECRET=$OPENAI_SECRET,_API_SECRET=$API_SECRET,_ADMIN_SECRET=$ADMIN_SECRET,_ADMIN_USER=admin
+   # Set environment variables and redeploy with admin enabled
+   export OPENAI_SECRET=$OPENAI_SECRET
+   export API_SECRET=$API_SECRET
+   export ADMIN_SECRET=$ADMIN_SECRET
+   export ADMIN_USER=admin
+   ./deploy.sh
    ```
 3. Verify secret exists in Secret Manager:
    ```bash
@@ -1666,25 +1687,28 @@ func (h *Handler) IsEnabled() bool {
 
 **Solution**: Use HTTP Basic Auth with:
 - Username: value from `ADMIN_USER` environment variable
-- Password: value from Secret Manager secret (name in `_ADMIN_SECRET`)
+- Password: value from Secret Manager secret (name in `ADMIN_SECRET`)
 
 #### Issue: Build Fails with "Secret not found"
 
-**Symptoms**: Cloud Build fails with error about missing secret
+**Symptoms**: Deployment fails with error about missing secret
 
 **Causes**:
-1. Secret name in `_OPENAI_SECRET` or `_API_SECRET` doesn't exist
-2. Secret exists but Cloud Build service account lacks access
+1. Secret name in `OPENAI_SECRET` or `API_SECRET` environment variable doesn't exist
+2. Secret exists but Cloud Run service account lacks access
 
 **Solution**:
 1. Verify secret exists:
    ```bash
    gcloud secrets list --filter="name:<secret-name>"
    ```
-2. Grant Cloud Build service account access:
+2. Grant Cloud Run service account access:
    ```bash
+   PROJECT_NUMBER=$(gcloud projects describe $(gcloud config get-value project) --format="value(projectNumber)")
+   SERVICE_ACCOUNT="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+   
    gcloud secrets add-iam-policy-binding <secret-name> \
-     --member="serviceAccount:<project-number>@cloudbuild.gserviceaccount.com" \
+     --member="serviceAccount:${SERVICE_ACCOUNT}" \
      --role="roles/secretmanager.secretAccessor"
    ```
 
@@ -1722,7 +1746,7 @@ Before deploying, verify:
   - [ ] OpenAI API key secret (name for `_OPENAI_SECRET`)
   - [ ] API authentication key secret (name for `_API_SECRET`)
   - [ ] Admin password secret (name for `_ADMIN_SECRET`)
-- [ ] Cloud Build service account has `secretAccessor` role for all secrets
+- [ ] Cloud Run service account has `secretAccessor` role for all secrets
 - [ ] Artifact Registry repository exists and is accessible
 - [ ] Substitution variables use correct secret names (not values)
 - [ ] **Both `_ADMIN_SECRET` and `_ADMIN_USER` are provided** (standard deployment)
@@ -1896,8 +1920,9 @@ echo "config.local.*" >> .gitignore
 1. **Use placeholders**:
    ```bash
    # ✅ CORRECT
-   gcloud builds submit --config=cloudbuild.yaml \
-     --substitutions=_OPENAI_SECRET=<your-openai-secret-name>,_API_SECRET=<your-api-secret-name>
+   export OPENAI_SECRET=<your-openai-secret-name>
+   export API_SECRET=<your-api-secret-name>
+   ./deploy.sh
    ```
 
 2. **Document how to find secrets**:
@@ -1906,13 +1931,17 @@ echo "config.local.*" >> .gitignore
    # Get your secret names:
    OPENAI_SECRET=$(gcloud secrets list --format="value(name)" | grep -iE "openai|oai" | head -1)
    API_SECRET=$(gcloud secrets list --format="value(name)" | grep -E "api-key" | head -1)
+   export OPENAI_SECRET=$OPENAI_SECRET
+   export API_SECRET=$API_SECRET
+   ./deploy.sh
    ```
 
 3. **Never include actual secret names**:
    ```bash
    # ❌ WRONG - actual secret name exposed
-   gcloud builds submit --config=cloudbuild.yaml \
-     --substitutions=_OPENAI_SECRET=clotilde-oai-e2665d43
+   export OPENAI_SECRET=clotilde-oai-e2665d43
+   export API_SECRET=clotilde-auth-xyz789
+   ./deploy.sh
    ```
 
 #### For Developers

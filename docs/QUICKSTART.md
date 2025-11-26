@@ -40,15 +40,17 @@ This will:
 ### 3. Deploy to Cloud Run
 
 ```bash
+# Set required environment variables
+export OPENAI_SECRET=your-openai-secret-name
+export API_SECRET=your-api-secret-name
+
+# Optional: Enable admin dashboard
+export ADMIN_USER=admin
+export ADMIN_SECRET=your-admin-password-secret-name
+
+# Deploy
 chmod +x deploy.sh
 ./deploy.sh
-```
-
-Or use Cloud Build:
-
-```bash
-gcloud builds submit --config=cloudbuild.yaml \
-    --substitutions=_OPENAI_SECRET=$OPENAI_SECRET,_API_SECRET=$API_SECRET
 ```
 
 ### 4. Get Your Service URL
