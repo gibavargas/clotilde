@@ -1774,3 +1774,292 @@ After deploying, verify:
 **Pass Rate**: 100%  
 **Rating**: 8.5/10 (Production-ready)
 
+---
+
+## 🔐 Secret Management Best Practices (Critical Security)
+
+### Overview
+
+**Date Implemented**: 2025-11-26  
+**Severity**: 🔴 Critical  
+**Purpose**: Prevent accidental exposure of secret names or values in git history
+
+### What Happened
+
+A deployment guide file (`DEPLOY_AGENT_GUIDE.md`) was accidentally committed to the repository containing actual secret names from Google Secret Manager. While the secret **values** were not exposed (they're stored securely in Secret Manager), the secret **names** were visible in the public repository.
+
+**Why This Matters**:
+- Secret names reveal infrastructure details
+- Attackers can target specific secrets if they gain GCP access
+- Predictable secret names reduce security through obscurity
+- Information disclosure violates security best practices
+
+**Resolution**: The file was completely removed from git history using `git filter-branch` and force-pushed to overwrite remote history.
+
+---
+
+### How to Prevent Secret Exposure
+
+#### 1. Pre-Commit Checklist
+
+**ALWAYS check before committing**:
+
+```bash
+# Check for secret names or values in staged files
+git diff --cached | grep -iE "(secret|password|api.*key|token|credential)"
+
+# Check for actual secret values (base64, hex patterns)
+git diff --cached | grep -E "([A-Za-z0-9+/]{40,}|[0-9a-f]{32,})"
+
+# Check for Google Secret Manager secret name patterns
+git diff --cached | grep -E "clotilde-.*-[a-f0-9]{8}"
+
+# Check for environment variable files
+git status | grep -E "\.env|secrets|config\.local"
+```
+
+**If any matches are found**: **DO NOT COMMIT**. Remove the sensitive information first.
+
+#### 2. Files That Should NEVER Contain Secrets
+
+**Never commit these types of files**:
+- `*.env` or `.env.local` files
+- `*secrets*.md` or `*secret*.md` documentation files
+- `DEPLOY_*.md` files with actual secret names
+- `config.local.*` or `*.local.*` configuration files
+- Any file with actual secret names (use placeholders instead)
+
+**Safe alternatives**:
+- Use `.env.example` with placeholder values
+- Use `DEPLOY_GUIDE.md` with placeholder secret names
+- Document secret names in a secure local file (not in repo)
+- Use environment variable references: `$OPENAI_SECRET_NAME`
+
+#### 3. Documentation Best Practices
+
+**✅ DO**:
+```markdown
+# Example: Safe documentation
+export OPENAI_SECRET="<your-openai-secret-name>"
+export API_SECRET="<your-api-secret-name>"
+
+# Or use placeholders
+export OPENAI_SECRET="clotilde-oai-XXXXXXXX"  # Replace XXXX with your actual name
+```
+
+**❌ DON'T**:
+```markdown
+# Example: UNSAFE - actual secret names exposed
+export OPENAI_SECRET="clotilde-oai-e2665d43"
+export API_SECRET="clotilde-auth-e2665d43"
+```
+
+#### 4. Git Configuration
+
+**Set up git to help prevent accidental commits**:
+
+```bash
+# Add to .gitignore (if not already there)
+echo "*.env" >> .gitignore
+echo "*.env.local" >> .gitignore
+echo "*secrets*.md" >> .gitignore
+echo "DEPLOY_AGENT_GUIDE.md" >> .gitignore
+echo "config.local.*" >> .gitignore
+
+# Use git hooks to check before commit (optional)
+# Create .git/hooks/pre-commit with secret detection
+```
+
+#### 5. Code Review Guidelines
+
+**When reviewing code or documentation**:
+
+1. **Check for hardcoded secrets**: Search for patterns like:
+   - `clotilde-.*-[a-f0-9]{8}` (secret name pattern)
+   - `sk-.*` (OpenAI API key pattern)
+   - Long base64/hex strings (potential secret values)
+
+2. **Verify placeholders**: Ensure documentation uses placeholders, not actual values
+
+3. **Check environment variables**: Verify code reads from environment, not hardcoded values
+
+4. **Review deployment guides**: Ensure they don't contain actual secret names
+
+---
+
+### Secret Management Workflow
+
+#### For AI Agents Helping with Deployment
+
+**When creating deployment documentation**:
+
+1. **Use placeholders**:
+   ```bash
+   # ✅ CORRECT
+   gcloud builds submit --config=cloudbuild.yaml \
+     --substitutions=_OPENAI_SECRET=<your-openai-secret-name>,_API_SECRET=<your-api-secret-name>
+   ```
+
+2. **Document how to find secrets**:
+   ```bash
+   # ✅ CORRECT - teaches how to find, doesn't reveal actual names
+   # Get your secret names:
+   OPENAI_SECRET=$(gcloud secrets list --format="value(name)" | grep -iE "openai|oai" | head -1)
+   API_SECRET=$(gcloud secrets list --format="value(name)" | grep -E "api-key" | head -1)
+   ```
+
+3. **Never include actual secret names**:
+   ```bash
+   # ❌ WRONG - actual secret name exposed
+   gcloud builds submit --config=cloudbuild.yaml \
+     --substitutions=_OPENAI_SECRET=clotilde-oai-e2665d43
+   ```
+
+#### For Developers
+
+**Local development**:
+
+1. **Store secrets locally** (not in repo):
+   ```bash
+   # Create local file (NOT committed to git)
+   cat > ~/.clotilde-secrets.local <<EOF
+   export OPENAI_SECRET_NAME="your-actual-secret-name"
+   export API_SECRET_NAME="your-actual-secret-name"
+   EOF
+   
+   # Source it when needed
+   source ~/.clotilde-secrets.local
+   ```
+
+2. **Use environment variables**:
+   ```bash
+   # Set in your shell, not in code
+   export OPENAI_SECRET_NAME="your-secret-name"
+   export API_SECRET_NAME="your-secret-name"
+   ```
+
+3. **Never commit `.env` files**:
+   ```bash
+   # Add to .gitignore
+   echo ".env" >> .gitignore
+   echo ".env.local" >> .gitignore
+   ```
+
+---
+
+### What to Do If Secrets Are Accidentally Committed
+
+**If you discover secrets in git history**:
+
+1. **Immediately remove from history**:
+   ```bash
+   # Remove file from all git history
+   git filter-branch --force --index-filter \
+     'git rm --cached --ignore-unmatch <filename>' \
+     --prune-empty --tag-name-filter cat -- --all
+   
+   # Clean up
+   rm -rf .git/refs/original/
+   git reflog expire --expire=now --all
+   git gc --prune=now --aggressive
+   ```
+
+2. **Force push to overwrite remote**:
+   ```bash
+   git push origin --force --all
+   ```
+
+3. **Rotate the secrets** (if values were exposed):
+   ```bash
+   # Create new secrets with different names
+   # Update deployments to use new secrets
+   # Delete old secrets
+   ```
+
+4. **Notify team members**:
+   - Ask them to delete local clones
+   - Have them re-clone the repository
+   - Update any local documentation
+
+---
+
+### Verification Checklist
+
+**Before every commit, verify**:
+
+- [ ] No actual secret names in code or documentation
+- [ ] No secret values (API keys, passwords) anywhere
+- [ ] Documentation uses placeholders (`<your-secret-name>`, `XXXXXXXX`)
+- [ ] `.env` files are in `.gitignore`
+- [ ] Deployment guides use placeholders or commands to find secrets
+- [ ] No hardcoded credentials in any file
+- [ ] Git status shows no unexpected files
+
+**Before pushing to remote**:
+
+- [ ] Run `git log -p` to review recent commits for secrets
+- [ ] Search for secret patterns: `git log --all -S "clotilde-" --source --all`
+- [ ] Verify `.gitignore` is working correctly
+- [ ] Check that no sensitive files are tracked
+
+---
+
+### Security Best Practices Summary
+
+1. **✅ Use placeholders in documentation**: Never commit actual secret names
+2. **✅ Store secrets locally**: Use `.env.local` (not committed) or environment variables
+3. **✅ Use Secret Manager**: Store actual values in Google Secret Manager, not in code
+4. **✅ Configure `.gitignore`**: Prevent accidental commits of sensitive files
+5. **✅ Review before commit**: Always check `git diff` before committing
+6. **✅ Use environment variables**: Code should read from environment, not hardcoded values
+7. **✅ Document how to find secrets**: Teach the process, don't reveal the names
+8. **✅ Rotate if exposed**: If secrets are committed, rotate them immediately
+
+---
+
+### Files That Are Safe to Commit
+
+**These files are safe** (use placeholders):
+- `README.md` - General documentation
+- `docs/QUICKSTART.md` - Setup instructions with placeholders
+- `docs/SECURITY.md` - Security documentation (no actual secrets)
+- `cloudbuild.yaml` - Uses substitution variables (not actual names)
+- `deploy.sh` - Reads from environment variables
+- `setup-gcloud.sh` - Uses environment variables
+
+**These files should NEVER be committed**:
+- `DEPLOY_AGENT_GUIDE.md` - Contains actual secret names
+- `.env` or `.env.local` - Contains actual secret values
+- `*secrets*.md` - Documentation with actual secret names
+- Any file with actual secret names or values
+
+---
+
+### For AI Agents: Critical Rules
+
+**When helping with deployment or documentation**:
+
+1. **NEVER include actual secret names** in any file you create or modify
+2. **ALWAYS use placeholders**: `<your-secret-name>`, `XXXXXXXX`, or commands to find secrets
+3. **CHECK before committing**: Run `git diff` to verify no secrets are included
+4. **USE environment variables**: Document how to set them, not the actual values
+5. **TEACH the process**: Show how to find secrets, don't reveal the names
+
+**Example of safe documentation**:
+```markdown
+# ✅ SAFE - Uses placeholder
+export OPENAI_SECRET="<your-openai-secret-name>"
+
+# ✅ SAFE - Shows how to find it
+OPENAI_SECRET=$(gcloud secrets list --format="value(name)" | grep -i openai | head -1)
+
+# ❌ UNSAFE - Actual secret name exposed
+export OPENAI_SECRET="clotilde-oai-e2665d43"
+```
+
+---
+
+**Last Updated**: 2025-11-26  
+**Status**: Implemented ✅  
+**Critical**: This must be followed for all future commits
+
