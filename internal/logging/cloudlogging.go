@@ -109,6 +109,7 @@ func (cl *CloudLogger) Log(entry LogEntry) {
 		"ip_hash":          entry.IPHash,
 		"message_length":   entry.MessageLength,
 		"model":            entry.Model,
+		"category":         entry.Category,
 		"response_time_ms": entry.ResponseTime,
 		"token_estimate":   entry.TokenEstimate,
 		"status":           entry.Status,

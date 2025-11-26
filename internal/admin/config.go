@@ -29,6 +29,7 @@ var (
 		StandardModel:    "gpt-4o-mini",
 		PremiumModel:     "gpt-4o-mini", // Default to gpt-4o-mini for cost efficiency
 	}
+	defaultCategoryPrompts = make(map[string]string) // Store default category prompts
 	initialized = false
 )
 
@@ -46,15 +47,39 @@ func SetDefaultConfig(defaultSystemPrompt string) {
 	}
 }
 
+// SetDefaultCategoryPrompts stores the default category prompts for UI display
+// This should be called once at startup with the default category prompt templates
+func SetDefaultCategoryPrompts(prompts map[string]string) {
+	configMutex.Lock()
+	defer configMutex.Unlock()
+	
+	for k, v := range prompts {
+		defaultCategoryPrompts[k] = v
+	}
+}
+
 // GetConfig returns a copy of the current runtime configuration
+// If category prompts are not set, returns default category prompts for UI display
 func GetConfig() RuntimeConfig {
 	configMutex.RLock()
 	defer configMutex.RUnlock()
 	
 	// Deep copy maps
 	categoryPrompts := make(map[string]string)
-	for k, v := range runtimeConfig.CategoryPrompts {
-		categoryPrompts[k] = v
+	
+	// If category prompts are set in runtime config, use those
+	// Otherwise, use defaults for UI display
+	// Check if map is nil (never set) vs empty (explicitly cleared)
+	if runtimeConfig.CategoryPrompts != nil {
+		// Map exists - use it (even if empty, user explicitly cleared it)
+		for k, v := range runtimeConfig.CategoryPrompts {
+			categoryPrompts[k] = v
+		}
+	} else {
+		// Map is nil - never been set, return defaults so UI can display them
+		for k, v := range defaultCategoryPrompts {
+			categoryPrompts[k] = v
+		}
 	}
 	
 	categoryModels := make(map[string]string)

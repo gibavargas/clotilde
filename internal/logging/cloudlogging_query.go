@@ -140,6 +140,9 @@ func convertCloudLogEntry(cloudEntry *loggingpb.LogEntry) *LogEntry {
 	if model, ok := payload["model"].(string); ok {
 		entry.Model = model
 	}
+	if category, ok := payload["category"].(string); ok {
+		entry.Category = category
+	}
 	if respTime, ok := payload["response_time_ms"].(float64); ok {
 		entry.ResponseTime = int64(respTime)
 	}

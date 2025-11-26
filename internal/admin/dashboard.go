@@ -926,6 +926,7 @@ const dashboardHTML = `<!DOCTYPE html>
                         <th>Time</th>
                         <th>Request ID</th>
                         <th>Model</th>
+                        <th>Category</th>
                         <th>Response Time</th>
                         <th>Status</th>
                         <th>Details</th>
@@ -950,6 +951,13 @@ const dashboardHTML = `<!DOCTYPE html>
                                 </span>
                             ` + "`" + ` : '<span style="color: var(--text-secondary); font-size: 11px;">N/A</span>'}
                         </td>
+                        <td>
+                            ${entry.category ? ` + "`" + `
+                                <span class="badge badge-model" style="background: rgba(88, 166, 255, 0.15); color: var(--accent-cyan);">
+                                    ${formatCategory(entry.category)}
+                                </span>
+                            ` + "`" + ` : '<span style="color: var(--text-secondary); font-size: 11px;">-</span>'}
+                        </td>
                         <td>${entry.response_time_ms}ms</td>
                         <td>
                             <span class="badge ${entry.status === 'success' ? 'badge-success' : 'badge-error'}">
@@ -966,7 +974,7 @@ const dashboardHTML = `<!DOCTYPE html>
                         </td>
                     </tr>
                     <tr class="detail-row ${isExpanded ? 'visible' : ''}" id="detail-${safeId}">
-                        <td colspan="6" class="detail-cell">
+                        <td colspan="7" class="detail-cell">
                             <div class="detail-content">
                                 ${entry.input ? ` + "`" + `
                                     <div class="detail-section">
@@ -1022,6 +1030,14 @@ const dashboardHTML = `<!DOCTYPE html>
                 minute: '2-digit',
                 second: '2-digit'
             });
+        }
+
+        function formatCategory(category) {
+            if (!category) return '-';
+            // Convert snake_case to Title Case
+            return category.split('_').map(word => 
+                word.charAt(0).toUpperCase() + word.slice(1)
+            ).join(' ');
         }
 
         function escapeHtml(text) {

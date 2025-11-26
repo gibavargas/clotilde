@@ -301,6 +301,16 @@ func main() {
 
 	// Initialize default runtime configuration with the base system prompt template
 	admin.SetDefaultConfig(clotildeBaseSystemPromptTemplate)
+	
+	// Initialize default category prompts for UI display
+	defaultCategoryPrompts := map[string]string{
+		"web_search":  categoryPromptWebSearch,
+		"complex":     categoryPromptComplex,
+		"factual":     categoryPromptFactual,
+		"mathematical": categoryPromptMathematical,
+		"creative":    categoryPromptCreative,
+	}
+	admin.SetDefaultCategoryPrompts(defaultCategoryPrompts)
 
 	// Middleware order (outer to inner): requestID → validator → auth → ratelimit
 	// 1. RequestID: Adds unique request ID for tracing
@@ -436,13 +446,13 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 
 	var req ChatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.logRequest(requestID, r, "", "", "", time.Since(startTime), "error", "Invalid request body")
+		s.logRequest(requestID, r, "", "", "", "", time.Since(startTime), "error", "Invalid request body")
 		respondError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	if req.Message == "" {
-		s.logRequest(requestID, r, "", "", "", time.Since(startTime), "error", "Message is required")
+		s.logRequest(requestID, r, "", "", "", "", time.Since(startTime), "error", "Message is required")
 		respondError(w, "Message is required", http.StatusBadRequest)
 		return
 	}
@@ -450,7 +460,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	// Sanitize input to prevent prompt injection attacks (OWASP LLM Top 10 A1)
 	sanitizedMessage, err := promptinjection.ValidateInput(req.Message)
 	if err != nil {
-		s.logRequest(requestID, r, "", "", "", time.Since(startTime), "error", "Invalid input: "+err.Error())
+		s.logRequest(requestID, r, "", "", "", "", time.Since(startTime), "error", "Invalid input: "+err.Error())
 		respondError(w, "Invalid input", http.StatusBadRequest)
 		return
 	}
@@ -490,7 +500,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("[%s] OpenAI Responses API error: %v", requestID, err)
 		// Log original message for debugging, but use sanitized for API calls
-		s.logRequest(requestID, r, sanitizedMessage, "", route.Model, time.Since(startTime), "error", err.Error())
+		s.logRequest(requestID, r, sanitizedMessage, "", route.Model, string(route.Category), time.Since(startTime), "error", err.Error())
 		respondError(w, "Failed to get response from AI", http.StatusInternalServerError)
 		return
 	}
@@ -503,19 +513,20 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	responseTime := time.Since(startTime)
 	log.Printf("[%s] Response generated: Length=%d, Time=%v", requestID, len(response), responseTime)
 	// Log sanitized message (original stored separately if needed for audit)
-	s.logRequest(requestID, r, sanitizedMessage, response, route.Model, responseTime, "success", "")
+	s.logRequest(requestID, r, sanitizedMessage, response, route.Model, string(route.Category), responseTime, "success", "")
 
 	respondSuccess(w, response)
 }
 
 // logRequest adds a structured log entry with full input/output for Cloud Logging
-func (s *Server) logRequest(requestID string, r *http.Request, input, output, model string, responseTime time.Duration, status, errorMsg string) {
+func (s *Server) logRequest(requestID string, r *http.Request, input, output, model, category string, responseTime time.Duration, status, errorMsg string) {
 	entry := logging.LogEntry{
 		ID:            requestID,
 		Timestamp:     time.Now(),
 		IPHash:        hashIP(r.RemoteAddr),
 		MessageLength: len(input),
 		Model:         model,
+		Category:      category,
 		ResponseTime:  responseTime.Milliseconds(),
 		TokenEstimate: len(input) / 4, // Rough estimate: ~4 chars per token
 		Status:        status,
@@ -529,6 +540,14 @@ func (s *Server) logRequest(requestID string, r *http.Request, input, output, mo
 // removeURLsFromText removes any URLs, web addresses, or domain names from text
 // This is a safety net to ensure no URLs make it to the voice interface
 func removeURLsFromText(text string) string {
+	// Remove markdown links: [text](url) or ([text](url))
+	// First, remove markdown links wrapped in parentheses: ([text](url))
+	markdownLinkInParens := regexp.MustCompile(`\(\[[^\]]+\]\([^\)]+\)\)`)
+	text = markdownLinkInParens.ReplaceAllString(text, "")
+	// Then remove standard markdown links: [text](url)
+	markdownLinkPattern := regexp.MustCompile(`\[[^\]]+\]\([^\)]+\)`)
+	text = markdownLinkPattern.ReplaceAllString(text, "")
+
 	// Remove URLs (http://, https://, www.)
 	urlPattern := regexp.MustCompile(`(?i)(https?://|www\.)[^\s]+`)
 	text = urlPattern.ReplaceAllString(text, "")
@@ -543,7 +562,9 @@ func removeURLsFromText(text string) string {
 	text = strings.ReplaceAll(text, "visite", "")
 	text = strings.ReplaceAll(text, "veja em", "")
 
-	// Clean up extra spaces
+	// Clean up extra spaces and empty parentheses
+	text = strings.ReplaceAll(text, "()", "")
+	text = strings.ReplaceAll(text, "( )", "")
 	spacePattern := regexp.MustCompile(`\s+`)
 	text = spacePattern.ReplaceAllString(text, " ")
 

@@ -14,6 +14,7 @@ type LogEntry struct {
 	IPHash        string    `json:"ip_hash"`
 	MessageLength int       `json:"message_length"`
 	Model         string    `json:"model"`
+	Category      string    `json:"category,omitempty"` // Router category (web_search, complex, factual, etc.)
 	ResponseTime  int64     `json:"response_time_ms"`
 	TokenEstimate int       `json:"token_estimate"`
 	Status        string    `json:"status"` // "success" or "error"
