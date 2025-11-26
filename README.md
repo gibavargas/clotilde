@@ -328,7 +328,7 @@ Changes take effect immediately for all new requests.
 
 **Before Sharing on GitHub**: All API keys have been replaced with placeholders (`YOUR_API_KEY`, `YOUR_SERVICE_URL`) in documentation files. Sensitive files are excluded via `.gitignore`.
 
-See [SECURITY.md](SECURITY.md) for detailed security documentation.
+See [docs/SECURITY.md](docs/SECURITY.md) for detailed security documentation.
 
 ## Resource Usage
 
@@ -357,12 +357,12 @@ See [SECURITY.md](SECURITY.md) for detailed security documentation.
 
 ## Documentation
 
-- [QUICKSTART.md](QUICKSTART.md) - Quick 5-minute setup guide
-- [SECURITY.md](SECURITY.md) - Security documentation and best practices
-- [LOCAL_DOCKER.md](LOCAL_DOCKER.md) - Local Docker development guide
-- [SHORTCUT_SETUP.md](SHORTCUT_SETUP.md) - Apple Shortcut setup guide (English)
-- [GUIA_SHORTCUT_IPHONE.md](GUIA_SHORTCUT_IPHONE.md) - Guia de configuração do Shortcut (Português)
-- [agents.md](agents.md) - AI agent documentation for code maintainers (critical code paths, common issues)
+- [docs/QUICKSTART.md](docs/QUICKSTART.md) - Quick 5-minute setup guide
+- [docs/SECURITY.md](docs/SECURITY.md) - Security documentation and best practices
+- [docs/LOCAL_DOCKER.md](docs/LOCAL_DOCKER.md) - Local Docker development guide
+- [docs/SHORTCUT_SETUP.md](docs/SHORTCUT_SETUP.md) - Apple Shortcut setup guide (English)
+- [docs/GUIA_SHORTCUT_IPHONE.md](docs/GUIA_SHORTCUT_IPHONE.md) - Guia de configuração do Shortcut (Português)
+- [docs/agents.md](docs/agents.md) - AI agent documentation for code maintainers (critical code paths, common issues)
 
 ## License
 
