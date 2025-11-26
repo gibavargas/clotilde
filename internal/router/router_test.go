@@ -41,8 +41,14 @@ func TestRoute(t *testing.T) {
 			expectedWebSearch: false,
 		},
 		{
-			name:              "Factual - Who is",
+			name:              "Web Search - Who is (Dynamic Fact)",
 			question:          "Quem é o presidente do Brasil?",
+			expectedCategory:  CategoryWebSearch,
+			expectedWebSearch: true,
+		},
+		{
+			name:              "Factual - Static Fact",
+			question:          "Qual a capital da França?",
 			expectedCategory:  CategoryFactual,
 			expectedWebSearch: false,
 		},

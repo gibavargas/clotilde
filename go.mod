@@ -1,11 +1,12 @@
 module github.com/clotilde/carplay-assistant
 
-go 1.23.0
+go 1.25
 
 require (
 	cloud.google.com/go/logging v1.10.0
 	cloud.google.com/go/secretmanager v1.13.5
 	github.com/sashabaranov/go-openai v1.20.4
+	golang.org/x/text v0.28.0
 	google.golang.org/api v0.233.0
 	google.golang.org/protobuf v1.36.7
 )
@@ -34,7 +35,6 @@ require (
 	golang.org/x/oauth2 v0.30.0 // indirect
 	golang.org/x/sync v0.16.0 // indirect
 	golang.org/x/sys v0.35.0 // indirect
-	golang.org/x/text v0.28.0 // indirect
 	golang.org/x/time v0.12.0 // indirect
 	google.golang.org/genproto v0.0.0-20240722135656-d784300faade // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20250818200422-3122310a409c // indirect
