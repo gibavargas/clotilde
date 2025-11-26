@@ -357,9 +357,12 @@ See [SECURITY.md](SECURITY.md) for detailed security documentation.
 
 ## Documentation
 
+- [QUICKSTART.md](QUICKSTART.md) - Quick 5-minute setup guide
 - [SECURITY.md](SECURITY.md) - Security documentation and best practices
-- [agents.md](agents.md) - AI agent documentation for code maintainers (critical code paths, common issues)
 - [LOCAL_DOCKER.md](LOCAL_DOCKER.md) - Local Docker development guide
+- [SHORTCUT_SETUP.md](SHORTCUT_SETUP.md) - Apple Shortcut setup guide (English)
+- [GUIA_SHORTCUT_IPHONE.md](GUIA_SHORTCUT_IPHONE.md) - Guia de configuração do Shortcut (Português)
+- [agents.md](agents.md) - AI agent documentation for code maintainers (critical code paths, common issues)
 
 ## License
 
