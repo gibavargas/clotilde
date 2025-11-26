@@ -1472,42 +1472,9 @@ Before deploying, ensure you have:
 
 ---
 
-### Standard Deployment (Without Admin Dashboard)
+### Standard Deployment (With Admin Dashboard)
 
-**When to use**: Deploying the service for production use without admin UI access.
-
-**Command**:
-```bash
-gcloud builds submit --config=cloudbuild.yaml \
-  --substitutions=_OPENAI_SECRET=<openai-secret-name>,_API_SECRET=<api-secret-name>
-```
-
-**What this does**:
-- Builds Docker image from current directory
-- Pushes to Artifact Registry
-- Deploys to Cloud Run with:
-  - `OPENAI_KEY_SECRET_NAME` environment variable (from `_OPENAI_SECRET`)
-  - `API_KEY_SECRET_NAME` environment variable (from `_API_SECRET`)
-  - Secrets mounted from Secret Manager
-  - Admin dashboard **disabled** (404 on `/admin/`)
-
-**Verification**:
-```bash
-# Check service URL
-gcloud run services describe clotilde --region=us-central1 --format="value(status.url)"
-
-# Test health endpoint
-curl https://<service-url>/health
-
-# Verify admin is disabled (should return 404)
-curl -I https://<service-url>/admin/
-```
-
----
-
-### Deployment with Admin Dashboard
-
-**When to use**: Deploying with admin UI enabled for configuration management.
+**CRITICAL**: All deployments should include the admin dashboard. This is the standard deployment method.
 
 **Requirements**:
 - Admin username (set via `_ADMIN_USER` substitution)
@@ -1520,14 +1487,24 @@ gcloud builds submit --config=cloudbuild.yaml \
 ```
 
 **What this does**:
-- Same as standard deployment, plus:
-  - Sets `ADMIN_USER` environment variable (from `_ADMIN_USER`)
-  - Mounts `ADMIN_PASSWORD` secret (from `_ADMIN_SECRET`)
-  - Enables admin dashboard at `/admin/`
+- Builds Docker image from current directory
+- Pushes to Artifact Registry
+- Deploys to Cloud Run with:
+  - `OPENAI_KEY_SECRET_NAME` environment variable (from `_OPENAI_SECRET`)
+  - `API_KEY_SECRET_NAME` environment variable (from `_API_SECRET`)
+  - `ADMIN_USER` environment variable (from `_ADMIN_USER`)
+  - `ADMIN_PASSWORD` secret mounted (from `_ADMIN_SECRET`)
+  - Admin dashboard **enabled** at `/admin/`
 
 **Verification**:
 ```bash
-# Check admin is enabled (should return 401, not 404)
+# Check service URL
+gcloud run services describe clotilde --region=us-central1 --format="value(status.url)"
+
+# Test health endpoint
+curl https://<service-url>/health
+
+# Verify admin is enabled (should return 401, not 404)
 curl -I https://<service-url>/admin/
 # Expected: HTTP/2 401 with www-authenticate header
 
@@ -1542,6 +1519,39 @@ gcloud run services describe clotilde --region=us-central1 \
 3. Username: value from `_ADMIN_USER` substitution
 4. Password: value from Secret Manager secret named in `_ADMIN_SECRET`
 
+**Why Admin Dashboard is Standard**:
+- Allows runtime configuration changes without redeployment
+- Enables monitoring via logs and stats endpoints
+- Provides UI for model and prompt management
+- Reduces Cloud Run costs (no redeployment needed for config changes)
+
+---
+
+### Deployment Without Admin Dashboard (Not Recommended)
+
+**When to use**: Only in exceptional cases where admin UI must be disabled for security reasons.
+
+**Warning**: Deploying without admin dashboard disables runtime configuration management. All changes require redeployment.
+
+**Command**:
+```bash
+gcloud builds submit --config=cloudbuild.yaml \
+  --substitutions=_OPENAI_SECRET=<openai-secret-name>,_API_SECRET=<api-secret-name>
+```
+
+**What this does**:
+- Same as standard deployment, but:
+  - Admin dashboard **disabled** (404 on `/admin/`)
+  - No runtime configuration management
+  - All changes require code updates and redeployment
+
+**Verification**:
+```bash
+# Verify admin is disabled (should return 404)
+curl -I https://<service-url>/admin/
+# Expected: HTTP/2 404
+```
+
 ---
 
 ### Understanding cloudbuild.yaml Substitutions
@@ -1552,9 +1562,11 @@ The `cloudbuild.yaml` file uses substitution variables that **must** be provided
 - `_OPENAI_SECRET`: Name of Secret Manager secret containing OpenAI API key name
 - `_API_SECRET`: Name of Secret Manager secret containing API authentication key name
 
+**Required Substitutions** (for standard deployment):
+- `_ADMIN_SECRET`: Name of Secret Manager secret containing admin password (required for admin UI)
+- `_ADMIN_USER`: Admin username string (required for admin UI)
+
 **Optional Substitutions**:
-- `_ADMIN_SECRET`: Name of Secret Manager secret containing admin password (enables admin UI)
-- `_ADMIN_USER`: Admin username string (enables admin UI)
 - `_LOG_BUFFER_SIZE`: Max log entries in memory (default: 1000)
 - `_REGION`: Cloud Run region (default: us-central1)
 - `_REPO_NAME`: Artifact Registry repository name (default: clotilde-repo)
@@ -1683,11 +1695,14 @@ func (h *Handler) IsEnabled() bool {
 
 Before deploying, verify:
 
-- [ ] All required secrets exist in Secret Manager
+- [ ] All required secrets exist in Secret Manager:
+  - [ ] OpenAI API key secret (name for `_OPENAI_SECRET`)
+  - [ ] API authentication key secret (name for `_API_SECRET`)
+  - [ ] Admin password secret (name for `_ADMIN_SECRET`)
 - [ ] Cloud Build service account has `secretAccessor` role for all secrets
 - [ ] Artifact Registry repository exists and is accessible
 - [ ] Substitution variables use correct secret names (not values)
-- [ ] If enabling admin: both `_ADMIN_SECRET` and `_ADMIN_USER` are provided
+- [ ] **Both `_ADMIN_SECRET` and `_ADMIN_USER` are provided** (standard deployment)
 - [ ] Code compiles locally: `go build ./cmd/clotilde`
 - [ ] Tests pass: `go test ./...`
 
@@ -1695,21 +1710,23 @@ After deploying, verify:
 
 - [ ] Service URL is accessible: `curl https://<service-url>/health`
 - [ ] Health endpoint returns 200 OK
-- [ ] If admin enabled: `/admin/` returns 401 (not 404)
-- [ ] If admin disabled: `/admin/` returns 404
+- [ ] **Admin dashboard is enabled**: `/admin/` returns 401 (not 404)
+- [ ] Admin credentials work (can access admin UI)
 - [ ] Cloud Run logs show no errors
 - [ ] Service is using correct secrets (check logs for initialization)
+- [ ] Admin UI loads correctly at `https://<service-url>/admin/`
 
 ---
 
 ### Best Practices
 
-1. **Never commit secret names**: Use placeholders in documentation and provide actual names via `--substitutions` at deploy time
-2. **Use unique secret names**: Generate unpredictable secret names (e.g., `clotilde-oai-<random-hex>`) to prevent information disclosure
-3. **Separate admin deployments**: Only enable admin dashboard when needed for configuration changes
-4. **Verify after deployment**: Always check service health and admin status after deployment
+1. **Always deploy with admin dashboard**: Admin UI is standard and enables runtime configuration management
+2. **Never commit secret names**: Use placeholders in documentation and provide actual names via `--substitutions` at deploy time
+3. **Use unique secret names**: Generate unpredictable secret names (e.g., `clotilde-oai-<random-hex>`) to prevent information disclosure
+4. **Verify admin after deployment**: Always check that `/admin/` returns 401 (enabled) not 404 (disabled)
 5. **Check logs**: Review Cloud Run logs after deployment to catch initialization errors early
 6. **Test endpoints**: Verify all endpoints work correctly before considering deployment complete
+7. **Secure admin credentials**: Use strong passwords stored in Secret Manager, never in code or config files
 
 ---
 
