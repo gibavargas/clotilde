@@ -648,7 +648,7 @@ func getCurrentBrazilTime() string {
 // The Responses API has native web_search support and handles tool calls automatically
 func (s *Server) createResponse(ctx context.Context, route RouteDecision, instructions, input string) (string, error) {
 	// Build request body for Responses API
-	store := false // Don't store state for single-turn conversations
+	store := true // Enable logging so usage appears in OpenAI logs
 
 	reqBody := ResponsesAPIRequest{
 		Model:        route.Model,
