@@ -255,6 +255,98 @@ X-API-Key: your-api-key
 }
 ```
 
+### Configuration API
+
+The `/api/config` endpoint allows you to read and update system prompts and model configuration programmatically using your API key (same authentication as `/chat`). This is an alternative to the admin dashboard for programmatic access.
+
+#### Get Current Configuration
+
+```
+GET /api/config
+```
+
+**Headers:**
+```
+X-API-Key: your-api-key
+```
+
+**Response:**
+```json
+{
+  "base_system_prompt": "Você é \"Clotilde\"...",
+  "category_prompts": {
+    "web_search": "...",
+    "complex": "...",
+    "factual": "...",
+    "mathematical": "...",
+    "creative": "..."
+  },
+  "standard_model": "gpt-4.1-mini",
+  "premium_model": "gpt-4o-mini",
+  "category_models": {}
+}
+```
+
+#### Update Configuration
+
+```
+POST /api/config
+```
+
+**Headers:**
+```
+Content-Type: application/json
+X-API-Key: your-api-key
+```
+
+**Request Body:**
+```json
+{
+  "base_system_prompt": "Você é \"Clotilde\"...",
+  "category_prompts": {
+    "web_search": "Custom prompt for web search...",
+    "complex": "Custom prompt for complex queries..."
+  },
+  "standard_model": "gpt-4o-mini",
+  "premium_model": "gpt-4.1",
+  "category_models": {
+    "web_search": "gpt-4o"
+  }
+}
+```
+
+**Response (Success):**
+```json
+{
+  "base_system_prompt": "...",
+  "category_prompts": {...},
+  "standard_model": "gpt-4o-mini",
+  "premium_model": "gpt-4.1",
+  "category_models": {...}
+}
+```
+
+**Response (Error):**
+```json
+{
+  "error": "Error message"
+}
+```
+
+**Validation:**
+- Base system prompt must contain exactly one `%s` placeholder for date/time
+- Maximum prompt size: 10KB per prompt
+- Maximum request body size: 50KB
+- Models must be valid OpenAI Responses API models
+- Changes take effect immediately for all new requests
+
+**Status Codes:**
+- `200 OK`: Successful GET or POST
+- `400 Bad Request`: Invalid JSON or validation errors
+- `401 Unauthorized`: Missing or invalid API key
+- `413 Request Entity Too Large`: Config body exceeds size limit
+- `405 Method Not Allowed`: Unsupported HTTP method
+
 ## Admin Dashboard
 
 The admin dashboard provides a web-based interface for monitoring your Clotilde instance.
@@ -280,14 +372,17 @@ The admin dashboard provides a web-based interface for monitoring your Clotilde 
 
 ### API Endpoints
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /admin/` | Dashboard HTML page |
-| `GET /admin/logs` | JSON API for log entries (supports pagination and filtering) |
-| `GET /admin/stats` | JSON API for aggregated statistics |
-| `GET /admin/config` | Get current runtime configuration (system prompt, models) |
-| `POST /admin/config` | Update runtime configuration without redeployment |
-| `GET /health` | Enhanced health check with uptime, request count, and memory usage |
+| Endpoint | Description | Authentication |
+|----------|-------------|---------------|
+| `POST /chat` | Chat endpoint for AI responses | X-API-Key |
+| `GET /api/config` | Get current runtime configuration (system prompt, models) | X-API-Key |
+| `POST /api/config` | Update runtime configuration without redeployment | X-API-Key |
+| `GET /admin/` | Dashboard HTML page | HTTP Basic Auth |
+| `GET /admin/logs` | JSON API for log entries (supports pagination and filtering) | HTTP Basic Auth |
+| `GET /admin/stats` | JSON API for aggregated statistics | HTTP Basic Auth |
+| `GET /admin/config` | Get current runtime configuration (system prompt, models) | HTTP Basic Auth |
+| `POST /admin/config` | Update runtime configuration without redeployment | HTTP Basic Auth |
+| `GET /health` | Enhanced health check with uptime, request count, and memory usage | None |
 
 ### Runtime Configuration
 

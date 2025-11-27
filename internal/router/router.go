@@ -43,9 +43,10 @@ var modelsWithWebSearch = map[string]bool{
 	"gpt-5.1":   true, // with reasoning
 	"gpt-5-pro": true, // with reasoning
 	// gpt-5-mini and gpt-5-nano may not support web search
-	"o3":      true,
-	"o3-mini": true,
-	"o4-mini": true,
+	"gpt-5-mini": true,
+	"o3":         true,
+	"o3-mini":    true,
+	"o4-mini":    true,
 }
 
 // Fallback model for web search when configured model doesn't support it

@@ -179,14 +179,14 @@ func TestCORSConfiguration(t *testing.T) {
 	}
 }
 
-// TestDefaultModelConfiguration tests that default model is gpt-4o-mini
+// TestDefaultModelConfiguration tests that default model is gpt-4.1-mini
 func TestDefaultModelConfiguration(t *testing.T) {
 	// Initialize config with default prompt (required for GetConfig to work properly)
 	admin.SetDefaultConfig(clotildeBaseSystemPromptTemplate)
 	config := admin.GetConfig()
 	
-	if config.StandardModel != "gpt-4o-mini" {
-		t.Errorf("Expected StandardModel to be 'gpt-4o-mini', got '%s'", config.StandardModel)
+	if config.StandardModel != "gpt-4.1-mini" {
+		t.Errorf("Expected StandardModel to be 'gpt-4.1-mini', got '%s'", config.StandardModel)
 	}
 	
 	if config.PremiumModel != "gpt-4o-mini" {

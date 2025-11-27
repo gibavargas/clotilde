@@ -1163,7 +1163,7 @@ const dashboardHTML = `<!DOCTYPE html>
             
             const config = {
                 base_system_prompt: basePrompt,
-                category_prompts: Object.keys(categoryPrompts).length > 0 ? categoryPrompts : undefined,
+                category_prompts: categoryPrompts,
                 standard_model: document.getElementById('standardModel').value,
                 premium_model: document.getElementById('premiumModel').value,
                 // Legacy support
