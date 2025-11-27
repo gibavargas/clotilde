@@ -26,7 +26,7 @@ var (
 		BaseSystemPrompt: "", // Will be initialized with default from main.go
 		CategoryPrompts:  make(map[string]string),
 		CategoryModels:   make(map[string]string),
-		StandardModel:    "gpt-4o-mini",
+		StandardModel:    "gpt-4.1-mini",
 		PremiumModel:     "gpt-4o-mini", // Default to gpt-4o-mini for cost efficiency
 	}
 	defaultCategoryPrompts = make(map[string]string) // Store default category prompts
