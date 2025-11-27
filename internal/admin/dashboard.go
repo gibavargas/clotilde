@@ -728,6 +728,16 @@ const dashboardHTML = `<!DOCTYPE html>
                 </div>
             </div>
 
+            <div class="form-group" style="margin-bottom: 24px;">
+                <label class="form-label" style="display: flex; align-items: center; gap: 12px; cursor: pointer;">
+                    <input type="checkbox" id="perplexityEnabled" style="width: 20px; height: 20px; cursor: pointer; accent-color: var(--accent-cyan);">
+                    <span>Enable Perplexity Search API for Web Search</span>
+                </label>
+                <div class="stat-subtitle" style="margin-top: 8px; margin-left: 32px;">
+                    When enabled, uses Perplexity AI Search API instead of OpenAI's web_search tool for web search queries. Enabled by default.
+                </div>
+            </div>
+
             <div class="form-group">
                 <label class="form-label">Base System Prompt (Core Principles)</label>
                 <textarea class="form-control textarea-editor" id="baseSystemPrompt" spellcheck="false"></textarea>
@@ -1126,6 +1136,12 @@ const dashboardHTML = `<!DOCTYPE html>
                 if (config.premium_model) {
                     document.getElementById('premiumModel').value = config.premium_model;
                 }
+                if (config.perplexity_enabled !== undefined) {
+                    document.getElementById('perplexityEnabled').checked = config.perplexity_enabled;
+                } else {
+                    // Default to true if not set
+                    document.getElementById('perplexityEnabled').checked = true;
+                }
             } catch (error) {
                 console.error('Error loading config:', error);
                 // Don't show error toast on load to avoid annoyance if backend isn't ready
@@ -1166,6 +1182,7 @@ const dashboardHTML = `<!DOCTYPE html>
                 category_prompts: categoryPrompts,
                 standard_model: document.getElementById('standardModel').value,
                 premium_model: document.getElementById('premiumModel').value,
+                perplexity_enabled: document.getElementById('perplexityEnabled').checked,
                 // Legacy support
                 system_prompt: basePrompt
             };

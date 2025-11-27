@@ -8,6 +8,7 @@ A voice-activated CarPlay assistant powered by GPT-5 with web search capabilitie
 
 - 🚗 CarPlay integration via Apple Shortcuts
 - 🧠 OpenAI Responses API with web search for real-time information
+- 🔍 **Perplexity AI Search API integration** - Alternative web search provider with toggle control
 - 🇧🇷 Brazilian Portuguese responses (default)
 - 🔒 Security-first design with API key authentication, rate limiting, and input validation
 - 💰 Free tier optimized (Google Cloud Artifact Registry + Cloud Run)
@@ -70,9 +71,16 @@ echo -n "your-secure-api-key-here" | gcloud secrets create $API_SECRET \
     --data-file=- \
     --replication-policy="automatic"
 
+# Create Perplexity API key secret (optional - for web search)
+export PERPLEXITY_SECRET="my-perplexity-key-$(openssl rand -hex 4)"
+echo -n "your-perplexity-api-key" | gcloud secrets create $PERPLEXITY_SECRET \
+    --data-file=- \
+    --replication-policy="automatic"
+
 # Save your secret names securely (you'll need them for deployment)
 echo "OPENAI_SECRET=$OPENAI_SECRET"
 echo "API_SECRET=$API_SECRET"
+echo "PERPLEXITY_SECRET=$PERPLEXITY_SECRET"
 ```
 
 #### Grant Cloud Run Service Account Access
@@ -89,6 +97,13 @@ gcloud secrets add-iam-policy-binding $OPENAI_SECRET \
 gcloud secrets add-iam-policy-binding $API_SECRET \
     --member="serviceAccount:${SERVICE_ACCOUNT}" \
     --role="roles/secretmanager.secretAccessor"
+
+# Grant Secret Manager access for Perplexity API key (if created)
+if [ ! -z "$PERPLEXITY_SECRET" ]; then
+    gcloud secrets add-iam-policy-binding $PERPLEXITY_SECRET \
+        --member="serviceAccount:${SERVICE_ACCOUNT}" \
+        --role="roles/secretmanager.secretAccessor"
+fi
 ```
 
 ### 2. Build and Deploy
@@ -255,6 +270,53 @@ X-API-Key: your-api-key
 }
 ```
 
+### Perplexity Search API Integration
+
+Clotilde supports Perplexity AI Search API as an alternative to OpenAI's native web_search tool. When enabled, Perplexity provides web search results that are formatted and included in the system prompt for the OpenAI model.
+
+#### Features
+
+- **Toggle Control**: Enable/disable Perplexity via admin dashboard or API (enabled by default)
+- **Automatic Fallback**: Falls back to OpenAI web_search if Perplexity fails
+- **Language Filtering**: Automatically filters results by language (Portuguese for Brazilian queries)
+- **Result Formatting**: Search results are formatted and explained in the system prompt
+
+#### Setup
+
+1. **Create Perplexity API Key Secret**:
+   ```bash
+   export PERPLEXITY_SECRET="my-perplexity-key-$(openssl rand -hex 4)"
+   echo -n "pplx-YOUR_API_KEY_HERE" | gcloud secrets create $PERPLEXITY_SECRET \
+       --data-file=- \
+       --replication-policy="automatic"
+   ```
+
+2. **Grant Access**:
+   ```bash
+   gcloud secrets add-iam-policy-binding $PERPLEXITY_SECRET \
+       --member="serviceAccount:${SERVICE_ACCOUNT}" \
+       --role="roles/secretmanager.secretAccessor"
+   ```
+
+3. **Set Environment Variable** (in `deploy.sh` or Cloud Run):
+   ```bash
+   export PERPLEXITY_SECRET_NAME=$PERPLEXITY_SECRET
+   ```
+
+4. **Configure via Admin Dashboard**:
+   - Navigate to `/admin/` in your browser
+   - Toggle "Enable Perplexity Search API for Web Search" on/off
+   - Changes take effect immediately
+
+#### How It Works
+
+When Perplexity is enabled and a web search query is detected:
+1. Perplexity Search API is called with the user's query
+2. Results are formatted with titles, URLs, and snippets
+3. Formatted results are appended to the system prompt with explanation
+4. OpenAI model uses these results to generate the response
+5. If Perplexity fails, automatically falls back to OpenAI's web_search tool
+
 ### Configuration API
 
 The `/api/config` endpoint allows you to read and update system prompts and model configuration programmatically using your API key (same authentication as `/chat`). This is an alternative to the admin dashboard for programmatic access.
@@ -282,7 +344,8 @@ X-API-Key: your-api-key
     "creative": "..."
   },
   "standard_model": "gpt-4.1-mini",
-  "premium_model": "gpt-4o-mini",
+  "premium_model": "gpt-4.1-mini",
+  "perplexity_enabled": true,
   "category_models": {}
 }
 ```
@@ -309,6 +372,7 @@ X-API-Key: your-api-key
   },
   "standard_model": "gpt-4o-mini",
   "premium_model": "gpt-4.1",
+  "perplexity_enabled": true,
   "category_models": {
     "web_search": "gpt-4o"
   }
@@ -322,9 +386,34 @@ X-API-Key: your-api-key
   "category_prompts": {...},
   "standard_model": "gpt-4o-mini",
   "premium_model": "gpt-4.1",
+  "perplexity_enabled": true,
   "category_models": {...}
 }
 ```
+
+**Example: Toggle Perplexity Search API**
+
+To enable Perplexity:
+```bash
+curl -X POST https://your-service-url.run.app/api/config \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-api-key" \
+  -d '{
+    "perplexity_enabled": true
+  }'
+```
+
+To disable Perplexity (use OpenAI web_search instead):
+```bash
+curl -X POST https://your-service-url.run.app/api/config \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-api-key" \
+  -d '{
+    "perplexity_enabled": false
+  }'
+```
+
+Note: You can update just the `perplexity_enabled` field without changing other settings. The API will merge your changes with the existing configuration.
 
 **Response (Error):**
 ```json
@@ -389,8 +478,8 @@ The admin dashboard provides a web-based interface for monitoring your Clotilde 
 The admin dashboard allows you to change configuration without redeploying:
 
 - **System Prompt**: Edit the AI's personality and behavior instructions
-- **Standard Model**: Select the model for simple queries (e.g., `gpt-4o-mini`, `gpt-4.1-mini`)
-- **Premium Model**: Select the model for complex queries (e.g., `gpt-4.1`, `o3`)
+- **Standard Model**: Select the model for simple queries (e.g., `gpt-4.1-mini`, `gpt-4o-mini`)
+- **Premium Model**: Select the model for complex queries (default: `gpt-4.1-mini`, also supports `gpt-4.1`, `o3`)
 
 Changes take effect immediately for all new requests.
 

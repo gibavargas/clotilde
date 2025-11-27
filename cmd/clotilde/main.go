@@ -179,10 +179,11 @@ type RouteDecision struct {
 }
 
 type Server struct {
-	openaiClient *openai.Client
-	openaiAPIKey string
-	apiKeySecret string
-	logger       *logging.Logger
+	openaiClient   *openai.Client
+	openaiAPIKey   string
+	perplexityAPIKey string
+	apiKeySecret   string
+	logger         *logging.Logger
 }
 
 // ResponsesAPIRequest represents the request body for Responses API
@@ -271,6 +272,30 @@ func main() {
 		}
 	}
 
+	// Get Perplexity API key - prefer environment variable (Cloud Run secrets) over Secret Manager
+	perplexityKey := os.Getenv("PERPLEXITY_KEY_SECRET_NAME")
+	if perplexityKey == "" {
+		// Fallback to Secret Manager for local development
+		projectID := os.Getenv("GOOGLE_CLOUD_PROJECT")
+		if projectID == "" {
+			log.Fatal("GOOGLE_CLOUD_PROJECT environment variable not set")
+		}
+		// Secret name must be configured via environment variable (not hardcoded for security)
+		perplexitySecretName := os.Getenv("PERPLEXITY_SECRET_NAME")
+		if perplexitySecretName == "" {
+			// Perplexity is optional, so we don't fatal here - just log and continue
+			log.Printf("PERPLEXITY_SECRET_NAME not set - Perplexity Search API will be disabled")
+			perplexityKey = ""
+		} else {
+			var err error
+			perplexityKey, err = getSecret(ctx, secretClient, projectID, perplexitySecretName)
+			if err != nil {
+				log.Printf("Failed to get Perplexity API key: %v - Perplexity Search API will be disabled", err)
+				perplexityKey = ""
+			}
+		}
+	}
+
 	// Initialize OpenAI client (still used for router)
 	openaiClient := openai.NewClient(openaiKey)
 
@@ -278,10 +303,11 @@ func main() {
 	logger := logging.GetLogger()
 
 	server := &Server{
-		openaiClient: openaiClient,
-		openaiAPIKey: openaiKey,
-		apiKeySecret: apiKeySecret,
-		logger:       logger,
+		openaiClient:     openaiClient,
+		openaiAPIKey:     openaiKey,
+		perplexityAPIKey: perplexityKey,
+		apiKeySecret:     apiKeySecret,
+		logger:           logger,
 	}
 
 	// Setup middleware chain
@@ -647,36 +673,213 @@ func getCurrentBrazilTime() string {
 		now.Day(), monthName, now.Year(), now.Hour(), now.Minute())
 }
 
+// PerplexitySearchRequest represents the request body for Perplexity Search API
+type PerplexitySearchRequest struct {
+	Query            string   `json:"query"`
+	MaxResults       int      `json:"max_results,omitempty"`
+	MaxTokensPerPage int      `json:"max_tokens_per_page,omitempty"`
+	SearchLanguageFilter []string `json:"search_language_filter,omitempty"`
+}
+
+// PerplexitySearchResponse represents the response from Perplexity Search API
+type PerplexitySearchResponse struct {
+	Results []PerplexitySearchResult `json:"results"`
+}
+
+// PerplexitySearchResult represents a single search result from Perplexity
+type PerplexitySearchResult struct {
+	Title      string `json:"title"`
+	URL        string `json:"url"`
+	Snippet    string `json:"snippet"`
+	Date       string `json:"date,omitempty"`
+	LastUpdated string `json:"last_updated,omitempty"`
+}
+
+// performPerplexitySearch calls the Perplexity Search API to get web search results
+func (s *Server) performPerplexitySearch(ctx context.Context, query string) ([]PerplexitySearchResult, error) {
+	if s.perplexityAPIKey == "" {
+		return nil, fmt.Errorf("Perplexity API key not configured")
+	}
+
+	// Build request body
+	reqBody := PerplexitySearchRequest{
+		Query:            query,
+		MaxResults:       5,    // Default to 5 results
+		MaxTokensPerPage: 1024, // Default token limit per page
+	}
+
+	// Determine language filter based on query (Portuguese for Brazilian queries)
+	// Simple heuristic: if query contains Portuguese words, use Portuguese filter
+	if strings.Contains(strings.ToLower(query), "hoje") || 
+	   strings.Contains(strings.ToLower(query), "notícias") ||
+	   strings.Contains(strings.ToLower(query), "brasil") {
+		reqBody.SearchLanguageFilter = []string{"pt"}
+	}
+
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal Perplexity request: %w", err)
+	}
+
+	// Create HTTP request to Perplexity Search API
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", "https://api.perplexity.ai/search", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Perplexity request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", s.perplexityAPIKey))
+
+	// Make HTTP request
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to make Perplexity request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Read response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read Perplexity response: %w", err)
+	}
+
+	// Check HTTP status
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("Perplexity API returned status %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("Perplexity API returned status %d", resp.StatusCode)
+	}
+
+	// Parse response
+	var apiResp PerplexitySearchResponse
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		log.Printf("Failed to parse Perplexity response body: %s", string(body))
+		return nil, fmt.Errorf("failed to parse Perplexity response: %w", err)
+	}
+
+	return apiResp.Results, nil
+}
+
+// formatPerplexityResults formats Perplexity search results into a readable context string
+func formatPerplexityResults(results []PerplexitySearchResult) string {
+	if len(results) == 0 {
+		return ""
+	}
+
+	var builder strings.Builder
+	builder.WriteString("The following web search results were retrieved using Perplexity AI:\n\n")
+
+	for i, result := range results {
+		builder.WriteString(fmt.Sprintf("[%s] (source: %s)\n", result.Title, result.URL))
+		if result.Snippet != "" {
+			builder.WriteString(result.Snippet)
+			builder.WriteString("\n")
+		}
+		if i < len(results)-1 {
+			builder.WriteString("\n")
+		}
+	}
+
+	return builder.String()
+}
+
 // createResponse calls the OpenAI Responses API
 // The Responses API has native web_search support and handles tool calls automatically
 func (s *Server) createResponse(ctx context.Context, route RouteDecision, instructions, input string) (string, error) {
+	// Get current config to check Perplexity setting
+	config := admin.GetConfig()
+	
 	// Build request body for Responses API
 	store := true // Enable logging so usage appears in OpenAI logs
 
+	// Handle web search: use Perplexity if enabled, otherwise use OpenAI's web_search tool
+	if route.WebSearch {
+		if config.PerplexityEnabled && s.perplexityAPIKey != "" {
+			// Use Perplexity Search API
+			log.Printf("Using Perplexity Search API for web search")
+			perplexityResults, err := s.performPerplexitySearch(ctx, input)
+			if err != nil {
+				log.Printf("Perplexity search failed: %v, falling back to OpenAI web_search", err)
+				// Fallback to OpenAI web_search on error
+				webSearchTool := WebSearchTool{Type: "web_search"}
+				reqBody := ResponsesAPIRequest{
+					Model:        route.Model,
+					Input:        input,
+					Instructions: instructions,
+					Store:        &store,
+					Tools:        []interface{}{webSearchTool},
+				}
+				return s.makeOpenAIRequest(ctx, reqBody, route)
+			}
+			
+			// Format Perplexity results and append to instructions
+			formattedResults := formatPerplexityResults(perplexityResults)
+			enhancedInstructions := instructions
+			if formattedResults != "" {
+				enhancedInstructions = fmt.Sprintf("%s\n\n%s", instructions, formattedResults)
+			}
+			
+			// Create request without web_search tool (using Perplexity results in instructions)
+			reqBody := ResponsesAPIRequest{
+				Model:        route.Model,
+				Input:        input,
+				Instructions: enhancedInstructions,
+				Store:        &store,
+			}
+			return s.makeOpenAIRequest(ctx, reqBody, route)
+		} else {
+			// Use OpenAI's native web_search tool
+			log.Printf("Using OpenAI web_search tool for web search")
+			webSearchTool := WebSearchTool{Type: "web_search"}
+			reqBody := ResponsesAPIRequest{
+				Model:        route.Model,
+				Input:        input,
+				Instructions: instructions,
+				Store:        &store,
+				Tools:        []interface{}{webSearchTool},
+			}
+			return s.makeOpenAIRequest(ctx, reqBody, route)
+		}
+	}
+
+	// No web search needed - create standard request
 	reqBody := ResponsesAPIRequest{
 		Model:        route.Model,
-		Input:        input, // Can be string or messages array
+		Input:        input,
 		Instructions: instructions,
 		Store:        &store,
 	}
+	return s.makeOpenAIRequest(ctx, reqBody, route)
+}
 
-	// Only enable web_search when needed (costs extra)
-	// All models that support Responses API support web_search tool
-	if route.WebSearch {
-		// Use web_search tool - supported by all Responses API models
-		webSearchTool := WebSearchTool{Type: "web_search"}
-		reqBody.Tools = []interface{}{webSearchTool}
-		log.Printf("[%s] Web search enabled for model: %s", route.Model, route.Model)
-	}
-
+// makeOpenAIRequest makes the actual HTTP request to OpenAI Responses API
+func (s *Server) makeOpenAIRequest(ctx context.Context, reqBody ResponsesAPIRequest, route RouteDecision) (string, error) {
 	// Set reasoning effort only for models that support it (o1, o3, gpt-5 series)
 	// Models like gpt-4o, gpt-4-turbo don't support reasoning parameter
 	// IMPORTANT: gpt-5 requires reasoning >= "low" for web search to work
 	// According to OpenAI docs: "Web search is currently not supported in gpt-5 with minimal reasoning"
+	// Note: This only applies when using OpenAI's web_search tool, not when using Perplexity
 	if modelSupportsReasoning(route.Model) {
 		reasoningEffort := route.ReasoningEffort
-		// If using gpt-5 with web search, must use at least "low" reasoning
-		if strings.HasPrefix(route.Model, "gpt-5") && route.WebSearch {
+		// Check if web_search tool is being used (not Perplexity)
+		usingWebSearchTool := false
+		if len(reqBody.Tools) > 0 {
+			// Check if any tool is a web_search tool
+			for _, tool := range reqBody.Tools {
+				if toolMap, ok := tool.(map[string]interface{}); ok {
+					if toolType, ok := toolMap["type"].(string); ok && toolType == "web_search" {
+						usingWebSearchTool = true
+						break
+					}
+				} else if toolStruct, ok := tool.(WebSearchTool); ok && toolStruct.Type == "web_search" {
+					usingWebSearchTool = true
+					break
+				}
+			}
+		}
+		
+		// If using gpt-5 with OpenAI's web_search tool, must use at least "low" reasoning
+		if strings.HasPrefix(route.Model, "gpt-5") && route.WebSearch && usingWebSearchTool {
 			if reasoningEffort == "" || reasoningEffort == "none" {
 				reasoningEffort = "low" // Minimum required for web search
 				log.Printf("gpt-5 with web search: using reasoning='low' (minimum required)")

@@ -7,9 +7,10 @@
 #   API_SECRET    - Name of your service API key secret in Secret Manager
 #
 # Optional environment variables:
-#   ADMIN_USER      - Admin username for dashboard (enables admin dashboard)
-#   ADMIN_SECRET    - Name of admin password secret in Secret Manager (enables admin dashboard)
-#   LOG_BUFFER_SIZE - Max log entries in memory (default: 1000)
+#   ADMIN_USER           - Admin username for dashboard (enables admin dashboard)
+#   ADMIN_SECRET         - Name of admin password secret in Secret Manager (enables admin dashboard)
+#   PERPLEXITY_SECRET_NAME - Name of Perplexity API key secret in Secret Manager (enables Perplexity Search API)
+#   LOG_BUFFER_SIZE      - Max log entries in memory (default: 1000)
 #
 # Example:
 #   export OPENAI_SECRET=my-openai-key-abc123
@@ -61,6 +62,9 @@ SECRETS="OPENAI_KEY_SECRET_NAME=${OPENAI_SECRET}:latest,API_KEY_SECRET_NAME=${AP
 if [ -n "$ADMIN_SECRET" ]; then
     SECRETS="${SECRETS},ADMIN_PASSWORD=${ADMIN_SECRET}:latest"
 fi
+if [ -n "$PERPLEXITY_SECRET_NAME" ]; then
+    SECRETS="${SECRETS},PERPLEXITY_SECRET_NAME=${PERPLEXITY_SECRET_NAME}:latest"
+fi
 
 echo "Building and deploying Clotilde..."
 echo "Project ID: $PROJECT_ID"
@@ -71,6 +75,9 @@ echo "API Secret: $API_SECRET"
 if [ -n "$ADMIN_USER" ]; then
     echo "Admin User: $ADMIN_USER"
     echo "Admin Secret: $ADMIN_SECRET"
+fi
+if [ -n "$PERPLEXITY_SECRET_NAME" ]; then
+    echo "Perplexity Secret: $PERPLEXITY_SECRET_NAME"
 fi
 echo "Log Buffer Size: $LOG_BUFFER_SIZE"
 echo ""

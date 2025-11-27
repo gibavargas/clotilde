@@ -184,13 +184,13 @@ func TestDefaultModelConfiguration(t *testing.T) {
 	// Initialize config with default prompt (required for GetConfig to work properly)
 	admin.SetDefaultConfig(clotildeBaseSystemPromptTemplate)
 	config := admin.GetConfig()
-	
+
 	if config.StandardModel != "gpt-4.1-mini" {
 		t.Errorf("Expected StandardModel to be 'gpt-4.1-mini', got '%s'", config.StandardModel)
 	}
-	
-	if config.PremiumModel != "gpt-4o-mini" {
-		t.Errorf("Expected PremiumModel to be 'gpt-4o-mini', got '%s'", config.PremiumModel)
+
+	if config.PremiumModel != "gpt-4.1-mini" {
+		t.Errorf("Expected PremiumModel to be 'gpt-4.1-mini', got '%s'", config.PremiumModel)
 	}
 }
 
@@ -201,10 +201,10 @@ func TestBuildSystemPrompt(t *testing.T) {
 	server := &Server{}
 	config := admin.GetConfig()
 	currentTime := "01 de janeiro de 2025, 12:00 (horário de Brasília)"
-	
+
 	// Test that base prompt includes edge case handling
 	prompt := server.buildSystemPrompt(config, router.CategorySimple, currentTime)
-	
+
 	// Check for key instructions in minimal base prompt
 	edgeCaseChecks := []string{
 		"não souber algo com certeza",
@@ -214,7 +214,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 		"máximo 2 parágrafos",
 		"português brasileiro",
 	}
-	
+
 	for _, check := range edgeCaseChecks {
 		if !strings.Contains(prompt, check) {
 			t.Errorf("Expected prompt to contain edge case handling for: %s", check)
@@ -228,9 +228,9 @@ func TestCategoryPrompts_WebSearch(t *testing.T) {
 	server := &Server{}
 	config := admin.GetConfig()
 	currentTime := "01 de janeiro de 2025, 12:00 (horário de Brasília)"
-	
+
 	prompt := server.buildSystemPrompt(config, router.CategoryWebSearch, currentTime)
-	
+
 	webSearchChecks := []string{
 		"não retornar resultados ou houver informações conflitantes",
 		"fatos confirmados e especulações",
@@ -238,7 +238,7 @@ func TestCategoryPrompts_WebSearch(t *testing.T) {
 		"informações confirmadas",
 		"notícia falsa",
 	}
-	
+
 	for _, check := range webSearchChecks {
 		if !strings.Contains(prompt, check) {
 			t.Errorf("Expected web search prompt to contain: %s", check)
@@ -252,9 +252,9 @@ func TestCategoryPrompts_Complex(t *testing.T) {
 	server := &Server{}
 	config := admin.GetConfig()
 	currentTime := "01 de janeiro de 2025, 12:00 (horário de Brasília)"
-	
+
 	prompt := server.buildSystemPrompt(config, router.CategoryComplex, currentTime)
-	
+
 	complexChecks := []string{
 		"pensamento crítico",
 		"múltiplas perspectivas",
@@ -262,7 +262,7 @@ func TestCategoryPrompts_Complex(t *testing.T) {
 		"conceitos-chave",
 		"declare-as explicitamente",
 	}
-	
+
 	for _, check := range complexChecks {
 		if !strings.Contains(prompt, check) {
 			t.Errorf("Expected complex prompt to contain: %s", check)
@@ -276,9 +276,9 @@ func TestCategoryPrompts_Factual(t *testing.T) {
 	server := &Server{}
 	config := admin.GetConfig()
 	currentTime := "01 de janeiro de 2025, 12:00 (horário de Brasília)"
-	
+
 	prompt := server.buildSystemPrompt(config, router.CategoryFactual, currentTime)
-	
+
 	factualChecks := []string{
 		"Não tenho certeza",
 		"reconheça a incerteza",
@@ -286,7 +286,7 @@ func TestCategoryPrompts_Factual(t *testing.T) {
 		"múltiplas interpretações válidas",
 		"tem confiança",
 	}
-	
+
 	for _, check := range factualChecks {
 		if !strings.Contains(prompt, check) {
 			t.Errorf("Expected factual prompt to contain: %s", check)
@@ -300,9 +300,9 @@ func TestCategoryPrompts_Mathematical(t *testing.T) {
 	server := &Server{}
 	config := admin.GetConfig()
 	currentTime := "01 de janeiro de 2025, 12:00 (horário de Brasília)"
-	
+
 	prompt := server.buildSystemPrompt(config, router.CategoryMathematical, currentTime)
-	
+
 	mathChecks := []string{
 		"Verifique cálculos",
 		"impossível ou indefinido",
@@ -310,7 +310,7 @@ func TestCategoryPrompts_Mathematical(t *testing.T) {
 		"números ou operações inválidos",
 		"unidades são incompatíveis",
 	}
-	
+
 	for _, check := range mathChecks {
 		if !strings.Contains(prompt, check) {
 			t.Errorf("Expected mathematical prompt to contain: %s", check)
@@ -324,9 +324,9 @@ func TestCategoryPrompts_Creative(t *testing.T) {
 	server := &Server{}
 	config := admin.GetConfig()
 	currentTime := "01 de janeiro de 2025, 12:00 (horário de Brasília)"
-	
+
 	prompt := server.buildSystemPrompt(config, router.CategoryCreative, currentTime)
-	
+
 	creativeChecks := []string{
 		"fundamentado na realidade",
 		"práticas e viáveis",
@@ -334,7 +334,7 @@ func TestCategoryPrompts_Creative(t *testing.T) {
 		"alternativas realistas",
 		"sugestões criativas e informações factuais",
 	}
-	
+
 	for _, check := range creativeChecks {
 		if !strings.Contains(prompt, check) {
 			t.Errorf("Expected creative prompt to contain: %s", check)
@@ -348,15 +348,15 @@ func TestPromptCostEfficiency(t *testing.T) {
 	server := &Server{}
 	config := admin.GetConfig()
 	currentTime := "01 de janeiro de 2025, 12:00 (horário de Brasília)"
-	
+
 	prompt := server.buildSystemPrompt(config, router.CategorySimple, currentTime)
-	
+
 	costEfficiencyChecks := []string{
 		"conciso",
 		"máximo 2 parágrafos",
 		"Seja conciso",
 	}
-	
+
 	for _, check := range costEfficiencyChecks {
 		if !strings.Contains(prompt, check) {
 			t.Errorf("Expected prompt to emphasize cost efficiency with: %s", check)
@@ -370,16 +370,16 @@ func TestPromptHallucinationPrevention(t *testing.T) {
 	server := &Server{}
 	config := admin.GetConfig()
 	currentTime := "01 de janeiro de 2025, 12:00 (horário de Brasília)"
-	
+
 	prompt := server.buildSystemPrompt(config, router.CategorySimple, currentTime)
-	
+
 	hallucinationChecks := []string{
 		"não souber algo com certeza",
 		"Nunca invente fatos",
 		"Nunca invente",
 		"não tem informações sobre isso",
 	}
-	
+
 	for _, check := range hallucinationChecks {
 		if !strings.Contains(prompt, check) {
 			t.Errorf("Expected prompt to prevent hallucinations with: %s", check)
@@ -392,4 +392,3 @@ func TestPromptHallucinationPrevention(t *testing.T) {
 // 2. Mocking or test API setup
 // 3. Actual test cases for each edge case category
 // These would be added in a separate integration test file or with proper test infrastructure
-
