@@ -1491,6 +1491,40 @@ Before deploying, ensure you have:
 
 ---
 
+### Admin Dashboard Behavior (Desired State)
+
+**CRITICAL**: Admin routes must always be registered to prevent 404 errors and provide clear user feedback.
+
+**Desired Behavior**:
+1. **Routes Always Registered**: Admin routes (`/admin/`, `/admin/logs`, `/admin/stats`, `/admin/config`) are always registered, regardless of configuration status
+2. **When Configured**: Returns HTTP 401 (Unauthorized) - requires Basic Auth credentials
+3. **When Not Configured**: Returns HTTP 503 (Service Unavailable) with helpful HTML error page explaining how to enable admin
+4. **Never Returns 404**: Routes are always present, so users never see confusing "not found" errors
+
+**Implementation Details**:
+- Admin routes are registered unconditionally in `cmd/clotilde/main.go` (lines 325-332)
+- `BasicAuthMiddleware` checks if admin is enabled via `IsEnabled()` method
+- If not enabled, returns 503 with HTML instructions instead of proceeding to authentication
+- This ensures consistent behavior and better user experience
+
+**Configuration Requirements**:
+- `ADMIN_USER` environment variable: Admin username (e.g., "admin")
+- `ADMIN_SECRET` environment variable: Name of Secret Manager secret containing admin password
+- Both must be set for admin dashboard to be functional
+
+**Security Note**: Never hardcode admin credentials or secret names in documentation. Always use environment variables and Secret Manager references (e.g., `gcloud secrets list` to find secret names).
+
+**Verification**:
+```bash
+# Check admin status (should return 401 if enabled, 503 if not configured, never 404)
+curl -I https://<service-url>/admin/
+# Expected when enabled: HTTP/2 401
+# Expected when disabled: HTTP/2 503
+# Never expected: HTTP/2 404
+```
+
+---
+
 ### Standard Deployment (With Admin Dashboard)
 
 **CRITICAL**: All deployments MUST include the admin dashboard. This is the standard deployment method.
@@ -1518,7 +1552,7 @@ chmod +x deploy.sh
 ./deploy.sh
 ```
 
-**⚠️ IMPORTANT**: If `ADMIN_USER` or `ADMIN_SECRET` are not provided, the admin dashboard will return 404 (not found) because routes won't be registered.
+**⚠️ IMPORTANT**: If `ADMIN_USER` or `ADMIN_SECRET` are not provided, the admin dashboard will return 503 (Service Unavailable) with a helpful error page. Routes are always registered to prevent 404 errors.
 
 **What this does**:
 - Builds Docker image from current directory
@@ -1580,13 +1614,13 @@ chmod +x deploy.sh
 
 **What this does**:
 - Same as standard deployment, but:
-  - Admin dashboard **disabled** (404 on `/admin/`)
+  - Admin dashboard **disabled** (503 on `/admin/` with helpful error page)
   - No runtime configuration management
   - All changes require code updates and redeployment
 
 **Verification**:
 ```bash
-# Verify admin is disabled (should return 404)
+# Verify admin is disabled (should return 503 with helpful error page)
 curl -I https://<service-url>/admin/
 # Expected: HTTP/2 404
 ```
@@ -1622,19 +1656,22 @@ The `deploy.sh` script uses environment variables that **must** be provided at d
 
 ### How Admin Dashboard Enablement Works
 
-**Code Location**: `cmd/clotilde/main.go` lines 294-301
+**Code Location**: `cmd/clotilde/main.go` lines 325-332
 
 ```go
+// Register admin routes (protected by HTTP Basic Auth)
+// Always register routes - BasicAuthMiddleware will handle the case when admin is not configured
+// This prevents 404 errors and provides better user feedback
 adminHandler := admin.NewHandler(logger)
+adminHandler.RegisterRoutes(mux)
 if adminHandler.IsEnabled() {
-    adminHandler.RegisterRoutes(mux)
     log.Printf("Admin dashboard enabled at /admin/")
 } else {
-    log.Printf("Admin dashboard disabled (ADMIN_USER and ADMIN_PASSWORD not set)")
+    log.Printf("Admin dashboard routes registered but disabled (ADMIN_USER and ADMIN_PASSWORD not set)")
 }
 ```
 
-**Enablement Check**: `internal/admin/admin.go` lines 414-417
+**Enablement Check**: `internal/admin/admin.go` lines 461-464
 
 ```go
 func (h *Handler) IsEnabled() bool {
@@ -1642,11 +1679,21 @@ func (h *Handler) IsEnabled() bool {
 }
 ```
 
-**What this means**:
+**Desired Behavior**:
+- Admin routes are **always registered** at: `/admin/`, `/admin/logs`, `/admin/stats`, `/admin/config`
 - Admin handler reads `ADMIN_USER` and `ADMIN_PASSWORD` from environment variables
-- If **both** are set and non-empty, admin dashboard is enabled
-- If either is missing or empty, admin dashboard returns 404 (not registered)
-- Admin routes are registered at: `/admin/`, `/admin/logs`, `/admin/stats`, `/admin/config`
+- If **both** are set and non-empty, admin dashboard is **enabled** and functional
+- If either is missing or empty:
+  - Routes are still registered (prevents 404 errors)
+  - `BasicAuthMiddleware` returns HTTP 503 (Service Unavailable) with a helpful HTML error page
+  - The error page explains that admin is not configured and provides instructions
+- This ensures users never see a 404 error - they get clear feedback about configuration status
+
+**Security**: Admin routes are protected by HTTP Basic Authentication with:
+- Rate limiting (5 failed attempts/minute → 15 minute lockout)
+- CSRF protection
+- Audit logging
+- Security headers (CSP with nonce, X-Frame-Options, etc.)
 
 **Security**: Admin routes are protected by HTTP Basic Authentication with:
 - Rate limiting (5 failed attempts/minute → 15 minute lockout)
@@ -1658,24 +1705,32 @@ func (h *Handler) IsEnabled() bool {
 
 ### Common Deployment Issues
 
-#### Issue: Admin Dashboard Returns 404
+#### Issue: Admin Dashboard Returns 503 (Service Unavailable)
 
-**Symptoms**: `curl -I https://<service-url>/admin/` returns `HTTP/2 404`
+**Symptoms**: `curl -I https://<service-url>/admin/` returns `HTTP/2 503` with HTML error page
+
+**Status**: ✅ **This is expected behavior when admin is not configured**
 
 **Causes**:
 1. `ADMIN_USER` environment variable not set
-2. `ADMIN_PASSWORD` secret not mounted
+2. `ADMIN_PASSWORD` secret not mounted (via `ADMIN_SECRET` environment variable)
 3. Either variable is empty string
+
+**What Happens**:
+- Admin routes are always registered (prevents 404 errors)
+- When not configured, `BasicAuthMiddleware` returns HTTP 503 with a helpful HTML page
+- The error page explains that admin is not configured and provides setup instructions
+- This ensures users never see confusing 404 errors
 
 **Solution**:
 1. Check if admin credentials are provided:
    ```bash
-   gcloud run services describe clotilde --region=us-central1 \
+   gcloud run services describe <service-name> --region=<region> \
      --format="get(spec.template.spec.containers[0].env)" | grep ADMIN
    ```
 2. If missing, redeploy with `ADMIN_SECRET` and `ADMIN_USER` environment variables:
    ```bash
-   # Get secret names
+   # Get secret names (without revealing actual secret names)
    OPENAI_SECRET=$(gcloud secrets list --format="value(name)" | grep -iE "openai|oai" | head -1)
    API_SECRET=$(gcloud secrets list --format="value(name)" | grep -E "clotilde-api-key|api-key" | head -1)
    ADMIN_SECRET=$(gcloud secrets list --format="value(name)" | grep -i admin | head -1)
@@ -1691,10 +1746,11 @@ func (h *Handler) IsEnabled() bool {
    ```bash
    gcloud secrets list --filter="name:<admin-secret-name>"
    ```
-4. After redeployment, verify admin is enabled (should return 401, not 404):
+4. After redeployment, verify admin is enabled (should return 401, not 503):
    ```bash
    curl -I https://<service-url>/admin/
-   # Expected: HTTP/2 401 (not 404)
+   # Expected: HTTP/2 401 (Unauthorized - admin is enabled and requires auth)
+   # If you see 503, admin is still not configured
    ```
 
 #### Issue: Admin Dashboard Returns 401 (Unauthorized)
@@ -1775,7 +1831,7 @@ After deploying, verify:
 
 - [ ] Service URL is accessible: `curl https://<service-url>/health`
 - [ ] Health endpoint returns 200 OK
-- [ ] **Admin dashboard is enabled**: `/admin/` returns 401 (not 404)
+- [ ] **Admin dashboard is enabled**: `/admin/` returns 401 (not 503 or 404)
 - [ ] Admin credentials work (can access admin UI)
 - [ ] Cloud Run logs show no errors
 - [ ] Service is using correct secrets (check logs for initialization)
@@ -1788,7 +1844,7 @@ After deploying, verify:
 1. **Always deploy with admin dashboard**: Admin UI is standard and enables runtime configuration management
 2. **Never commit secret names**: Use placeholders in documentation and provide actual names via `--substitutions` at deploy time
 3. **Use unique secret names**: Generate unpredictable secret names (e.g., `clotilde-oai-<random-hex>`) to prevent information disclosure
-4. **Verify admin after deployment**: Always check that `/admin/` returns 401 (enabled) not 404 (disabled)
+4. **Verify admin after deployment**: Always check that `/admin/` returns 401 (enabled) not 503 (disabled). Routes are always registered, so 404 should never occur.
 5. **Check logs**: Review Cloud Run logs after deployment to catch initialization errors early
 6. **Test endpoints**: Verify all endpoints work correctly before considering deployment complete
 7. **Secure admin credentials**: Use strong passwords stored in Secret Manager, never in code or config files
