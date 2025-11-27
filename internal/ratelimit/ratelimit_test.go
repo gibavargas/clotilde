@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/clotilde/carplay-assistant/internal/auth"
 )
 
 func TestMiddleware_AllowsFirstRequest(t *testing.T) {
@@ -312,15 +314,21 @@ func TestRateLimiter_IPFallback(t *testing.T) {
 
 func TestRateLimiter_DifferentKeys(t *testing.T) {
 	// Test that different API keys have separate rate limits
+	// Note: Rate limiter now requires validated API keys from context (set by auth middleware)
+	// This test simulates the context that auth middleware would set
 	handler := Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
 	// Make 10 requests with key1
+	// Simulate validated API key in context (as auth middleware would do)
 	key1 := "key-1"
 	for i := 0; i < 10; i++ {
 		req := httptest.NewRequest("POST", "/chat", nil)
 		req.Header.Set("X-API-Key", key1)
+		// Add validated API key to context (simulating auth middleware behavior)
+		ctx := auth.WithValidatedAPIKey(req.Context(), key1)
+		req = req.WithContext(ctx)
 		rr := httptest.NewRecorder()
 		handler.ServeHTTP(rr, req)
 		if rr.Code != http.StatusOK {
@@ -333,6 +341,9 @@ func TestRateLimiter_DifferentKeys(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		req := httptest.NewRequest("POST", "/chat", nil)
 		req.Header.Set("X-API-Key", key2)
+		// Add validated API key to context (simulating auth middleware behavior)
+		ctx := auth.WithValidatedAPIKey(req.Context(), key2)
+		req = req.WithContext(ctx)
 		rr := httptest.NewRecorder()
 		handler.ServeHTTP(rr, req)
 		if rr.Code != http.StatusOK {
