@@ -822,6 +822,6 @@ const dashboardHTML = `<!DOCTYPE html>
         </div>
     </div>
 
-    <script src="/admin/static/dashboard.js" data-csrf-token="{{CSRF_TOKEN}}"></script>
+    <script src="/admin/static/dashboard.js" data-csrf-token="{{CSRF_TOKEN}}" nonce="{{NONCE}}"></script>
 </body>
 </html>`

@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +15,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -633,14 +636,38 @@ func setCORSHeaders(w http.ResponseWriter) {
 	w.Header().Set("Access-Control-Max-Age", "3600")
 }
 
+var (
+	ipHashSalt     string
+	ipHashSaltOnce sync.Once
+)
+
+// getIPHashSalt returns the salt for IP hashing, loading it once from environment variable
+func getIPHashSalt() string {
+	ipHashSaltOnce.Do(func() {
+		// Use environment variable if set, otherwise use a default constant salt
+		// For production, set IP_HASH_SALT environment variable to a unique secret
+		ipHashSalt = os.Getenv("IP_HASH_SALT")
+		if ipHashSalt == "" {
+			// Default salt (should be overridden in production via environment variable)
+			ipHashSalt = "clotilde-ip-hash-salt-default-change-in-production"
+		}
+	})
+	return ipHashSalt
+}
+
 func hashIP(ip string) string {
-	// Simple hash for logging (not cryptographically secure, just for basic obfuscation)
-	// Using uint64 to avoid integer overflow on long strings
-	var hash uint64
-	for _, c := range ip {
-		hash = hash*31 + uint64(c)
-	}
-	return fmt.Sprintf("ip_%x", hash)
+	// Cryptographically secure IP hashing using SHA-256 with salt
+	// This prevents rainbow table attacks and makes it difficult to reverse hashes
+	// The salt is loaded from IP_HASH_SALT environment variable (or uses default)
+	salt := getIPHashSalt()
+	
+	// Hash IP with salt using SHA-256
+	hasher := sha256.New()
+	hasher.Write([]byte(salt + ip))
+	hash := hasher.Sum(nil)
+	
+	// Return hex-encoded hash with prefix for identification
+	return fmt.Sprintf("ip_%s", hex.EncodeToString(hash[:16])) // Use first 16 bytes (128 bits) for shorter hash
 }
 
 // getCurrentBrazilTime returns current date and time in Brazil/São Paulo timezone

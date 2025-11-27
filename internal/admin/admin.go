@@ -176,6 +176,17 @@ func hashIPUserAgent(ip, userAgent string) string {
 	return hex.EncodeToString(hash[:16]) // Use first 16 bytes
 }
 
+// generateNonce creates a cryptographically secure nonce for CSP
+func generateNonce() string {
+	bytes := make([]byte, 16) // 16 bytes = 128 bits of entropy
+	if _, err := rand.Read(bytes); err != nil {
+		log.Printf("Error generating nonce: %v", err)
+		return ""
+	}
+	// Base64 encode for use in CSP nonce attribute
+	return base64.URLEncoding.EncodeToString(bytes)
+}
+
 // generateCSRFToken creates a new CSRF token with memory limits and IP tracking
 func (h *Handler) generateCSRFToken(r *http.Request) string {
 	ip := getClientIP(r)
@@ -464,10 +475,18 @@ func (h *Handler) IsEnabled() bool {
 }
 
 // setSecurityHeaders sets security headers on admin responses
-func setSecurityHeaders(w http.ResponseWriter) {
-	// CSP: Removed 'unsafe-inline' from script-src to prevent XSS attacks
-	// JavaScript is now served from external file (/admin/static/dashboard.js)
-	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:;")
+// nonce is a cryptographic nonce for CSP script-src directive (empty string if not provided)
+func setSecurityHeaders(w http.ResponseWriter, nonce string) {
+	// CSP: Use nonce-based CSP to prevent XSS attacks while allowing inline scripts
+	// Nonce is generated per-request and cryptographically secure
+	var csp string
+	if nonce != "" {
+		csp = fmt.Sprintf("default-src 'self'; script-src 'self' 'nonce-%s'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:;", nonce)
+	} else {
+		// Fallback: no inline scripts allowed (scripts must be from external files)
+		csp = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:;"
+	}
+	w.Header().Set("Content-Security-Policy", csp)
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("X-XSS-Protection", "1; mode=block")
@@ -483,8 +502,8 @@ func (h *Handler) logAdminAction(action, ip, details string) {
 // BasicAuthMiddleware protects routes with HTTP Basic Authentication, rate limiting, and audit logging
 func (h *Handler) BasicAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Set security headers on all admin responses
-		setSecurityHeaders(w)
+		// Set security headers on all admin responses (no nonce needed for non-HTML responses)
+		setSecurityHeaders(w, "")
 		
 		if !h.IsEnabled() {
 			http.Error(w, "Admin interface not configured", http.StatusServiceUnavailable)
@@ -545,11 +564,21 @@ func (h *Handler) HandleDashboard(w http.ResponseWriter, r *http.Request) {
 	// Generate CSRF token for this session
 	csrfToken := h.generateCSRFToken(r)
 	
-	// Inject CSRF token into dashboard HTML
+	// Generate cryptographic nonce for CSP
+	nonce := generateNonce()
+	
+	// Set security headers with nonce
+	setSecurityHeaders(w, nonce)
+	
+	// Inject CSRF token and nonce into dashboard HTML
 	html := dashboardHTML
 	if csrfToken != "" {
 		// Replace placeholder with actual token
 		html = replaceCSRFToken(html, csrfToken)
+	}
+	if nonce != "" {
+		// Replace nonce placeholder with actual nonce
+		html = strings.ReplaceAll(html, "{{NONCE}}", nonce)
 	}
 	
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
