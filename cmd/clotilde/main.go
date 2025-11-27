@@ -182,11 +182,11 @@ type RouteDecision struct {
 }
 
 type Server struct {
-	openaiClient   *openai.Client
-	openaiAPIKey   string
+	openaiClient     *openai.Client
+	openaiAPIKey     string
 	perplexityAPIKey string
-	apiKeySecret   string
-	logger         *logging.Logger
+	apiKeySecret     string
+	logger           *logging.Logger
 }
 
 // ResponsesAPIRequest represents the request body for Responses API
@@ -333,14 +333,14 @@ func main() {
 
 	// Initialize default runtime configuration with the base system prompt template
 	admin.SetDefaultConfig(clotildeBaseSystemPromptTemplate)
-	
+
 	// Initialize default category prompts for UI display
 	defaultCategoryPrompts := map[string]string{
-		"web_search":  categoryPromptWebSearch,
-		"complex":     categoryPromptComplex,
-		"factual":     categoryPromptFactual,
+		"web_search":   categoryPromptWebSearch,
+		"complex":      categoryPromptComplex,
+		"factual":      categoryPromptFactual,
 		"mathematical": categoryPromptMathematical,
-		"creative":    categoryPromptCreative,
+		"creative":     categoryPromptCreative,
 	}
 	admin.SetDefaultCategoryPrompts(defaultCategoryPrompts)
 
@@ -352,12 +352,13 @@ func main() {
 	// 5. RateLimit: Rate-limits using VALIDATED API keys (prevents bypass attacks)
 	//
 	// Note: In Go middleware wrapping, the last wrapped executes first.
-	// So we wrap in reverse order: RateLimit → Auth → Validator → RequestID → PreAuth → Mux
-	handler := logging.RequestIDMiddleware(mux)
-	handler = validator.Middleware()(handler)
-	handler = ratelimit.PreAuthMiddleware()(handler) // IP-based, runs BEFORE auth
+	// So we wrap in reverse order: RateLimit → Auth → PreAuth → Validator → RequestID → Mux
+	// Execution Order: RequestID → Validator → PreAuth → Auth → RateLimit
+	handler := ratelimit.Middleware()(mux)           // Uses validated API key from context (runs LAST)
 	handler = auth.Middleware(apiKeySecret)(handler) // Validates API key, sets context
-	handler = ratelimit.Middleware()(handler)        // Uses validated API key from context
+	handler = ratelimit.PreAuthMiddleware()(handler) // IP-based, runs BEFORE auth
+	handler = validator.Middleware()(handler)        // Limits request size early
+	handler = logging.RequestIDMiddleware(handler)   // Adds ID first (runs FIRST)
 
 	serverAddr := fmt.Sprintf(":%s", port)
 
@@ -672,12 +673,12 @@ var (
 func getIPHashSalt() string {
 	ipHashSaltOnce.Do(func() {
 		ipHashSalt = os.Getenv("IP_HASH_SALT")
-		
+
 		// Check if running in production (Cloud Run)
 		// Cloud Run sets GOOGLE_CLOUD_PROJECT, K_SERVICE, and K_REVISION
-		isProduction := os.Getenv("GOOGLE_CLOUD_PROJECT") != "" && 
-		               (os.Getenv("K_SERVICE") != "" || os.Getenv("K_REVISION") != "")
-		
+		isProduction := os.Getenv("GOOGLE_CLOUD_PROJECT") != "" &&
+			(os.Getenv("K_SERVICE") != "" || os.Getenv("K_REVISION") != "")
+
 		if ipHashSalt == "" {
 			if isProduction {
 				// Production: fail to start if salt is not configured
@@ -692,7 +693,7 @@ func getIPHashSalt() string {
 			}
 		} else if len(ipHashSalt) < 16 {
 			// Warn if salt is too short
-			log.Printf("WARNING: IP_HASH_SALT is too short (%d characters). " +
+			log.Printf("WARNING: IP_HASH_SALT is too short (%d characters). "+
 				"Recommend using at least 32 characters for better security.", len(ipHashSalt))
 		}
 	})
@@ -704,12 +705,12 @@ func hashIP(ip string) string {
 	// This prevents rainbow table attacks and makes it difficult to reverse hashes
 	// The salt is loaded from IP_HASH_SALT environment variable (or uses default)
 	salt := getIPHashSalt()
-	
+
 	// Hash IP with salt using SHA-256
 	hasher := sha256.New()
 	hasher.Write([]byte(salt + ip))
 	hash := hasher.Sum(nil)
-	
+
 	// Return hex-encoded hash with prefix for identification
 	return fmt.Sprintf("ip_%s", hex.EncodeToString(hash[:16])) // Use first 16 bytes (128 bits) for shorter hash
 }
@@ -746,9 +747,9 @@ func getCurrentBrazilTime() string {
 
 // PerplexitySearchRequest represents the request body for Perplexity Search API
 type PerplexitySearchRequest struct {
-	Query            string   `json:"query"`
-	MaxResults       int      `json:"max_results,omitempty"`
-	MaxTokensPerPage int      `json:"max_tokens_per_page,omitempty"`
+	Query                string   `json:"query"`
+	MaxResults           int      `json:"max_results,omitempty"`
+	MaxTokensPerPage     int      `json:"max_tokens_per_page,omitempty"`
 	SearchLanguageFilter []string `json:"search_language_filter,omitempty"`
 }
 
@@ -759,10 +760,10 @@ type PerplexitySearchResponse struct {
 
 // PerplexitySearchResult represents a single search result from Perplexity
 type PerplexitySearchResult struct {
-	Title      string `json:"title"`
-	URL        string `json:"url"`
-	Snippet    string `json:"snippet"`
-	Date       string `json:"date,omitempty"`
+	Title       string `json:"title"`
+	URL         string `json:"url"`
+	Snippet     string `json:"snippet"`
+	Date        string `json:"date,omitempty"`
 	LastUpdated string `json:"last_updated,omitempty"`
 }
 
@@ -781,9 +782,9 @@ func (s *Server) performPerplexitySearch(ctx context.Context, query string) ([]P
 
 	// Determine language filter based on query (Portuguese for Brazilian queries)
 	// Simple heuristic: if query contains Portuguese words, use Portuguese filter
-	if strings.Contains(strings.ToLower(query), "hoje") || 
-	   strings.Contains(strings.ToLower(query), "notícias") ||
-	   strings.Contains(strings.ToLower(query), "brasil") {
+	if strings.Contains(strings.ToLower(query), "hoje") ||
+		strings.Contains(strings.ToLower(query), "notícias") ||
+		strings.Contains(strings.ToLower(query), "brasil") {
 		reqBody.SearchLanguageFilter = []string{"pt"}
 	}
 
@@ -859,7 +860,7 @@ func formatPerplexityResults(results []PerplexitySearchResult) string {
 func (s *Server) createResponse(ctx context.Context, route RouteDecision, instructions, input string) (string, error) {
 	// Get current config to check Perplexity setting
 	config := admin.GetConfig()
-	
+
 	// Build request body for Responses API
 	store := true // Enable logging so usage appears in OpenAI logs
 
@@ -882,14 +883,14 @@ func (s *Server) createResponse(ctx context.Context, route RouteDecision, instru
 				}
 				return s.makeOpenAIRequest(ctx, reqBody, route)
 			}
-			
+
 			// Format Perplexity results and append to instructions
 			formattedResults := formatPerplexityResults(perplexityResults)
 			enhancedInstructions := instructions
 			if formattedResults != "" {
 				enhancedInstructions = fmt.Sprintf("%s\n\n%s", instructions, formattedResults)
 			}
-			
+
 			// Create request without web_search tool (using Perplexity results in instructions)
 			reqBody := ResponsesAPIRequest{
 				Model:        route.Model,
@@ -948,7 +949,7 @@ func (s *Server) makeOpenAIRequest(ctx context.Context, reqBody ResponsesAPIRequ
 				}
 			}
 		}
-		
+
 		// If using gpt-5 with OpenAI's web_search tool, must use at least "low" reasoning
 		if strings.HasPrefix(route.Model, "gpt-5") && route.WebSearch && usingWebSearchTool {
 			if reasoningEffort == "" || reasoningEffort == "none" {
@@ -976,7 +977,7 @@ func (s *Server) makeOpenAIRequest(ctx context.Context, reqBody ResponsesAPIRequ
 	}
 
 	// Log request details (without sensitive data) for debugging
-	log.Printf("OpenAI Responses API request: model=%s, store=%v, has_tools=%v", 
+	log.Printf("OpenAI Responses API request: model=%s, store=%v, has_tools=%v",
 		reqBody.Model, reqBody.Store != nil && *reqBody.Store, len(reqBody.Tools) > 0)
 
 	// Create HTTP request to Responses API
@@ -1097,8 +1098,8 @@ func (s *Server) handleGetConfigAPI(w http.ResponseWriter, r *http.Request) {
 // handleSetConfigAPI updates the runtime configuration from JSON POST body
 func (s *Server) handleSetConfigAPI(w http.ResponseWriter, r *http.Request) {
 	const (
-		maxSystemPromptSize = 10 * 1024  // 10KB
-		maxConfigBodySize   = 50 * 1024  // 50KB
+		maxSystemPromptSize = 10 * 1024 // 10KB
+		maxConfigBodySize   = 50 * 1024 // 50KB
 	)
 
 	// Limit request body size

@@ -50,9 +50,12 @@ IMAGE_NAME="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/${SERVICE_NAME}:
 # Set defaults
 LOG_BUFFER_SIZE=${LOG_BUFFER_SIZE:-1000}
 
+# Generate random salt for IP hashing if not provided
+IP_HASH_SALT=${IP_HASH_SALT:-$(openssl rand -hex 32)}
+
 # Build environment variables string
 # Note: PORT is automatically set by Cloud Run, don't include it
-ENV_VARS="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},LOG_BUFFER_SIZE=${LOG_BUFFER_SIZE}"
+ENV_VARS="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},LOG_BUFFER_SIZE=${LOG_BUFFER_SIZE},IP_HASH_SALT=${IP_HASH_SALT}"
 if [ -n "$ADMIN_USER" ]; then
     ENV_VARS="${ENV_VARS},ADMIN_USER=${ADMIN_USER}"
 fi

@@ -1,11 +1,11 @@
 package admin
 
 import (
-	_ "embed"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	_ "embed"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -33,12 +33,12 @@ type Config struct {
 
 // csrfTokenInfo holds CSRF token metadata for reuse tracking
 type csrfTokenInfo struct {
-	Token       string
-	ExpiresAt   time.Time
-	CreatedAt   time.Time
-	IP          string
-	UserAgent   string
-	LastUsed    time.Time
+	Token     string
+	ExpiresAt time.Time
+	CreatedAt time.Time
+	IP        string
+	UserAgent string
+	LastUsed  time.Time
 }
 
 // adminRateLimiter tracks rate limits for admin routes
@@ -46,35 +46,35 @@ type adminRateLimiter struct {
 	authAttempts map[string][]time.Time // IP -> failed auth timestamps
 	requests     map[string][]time.Time // IP -> request timestamps
 	csrfTokens   map[string]int         // IP -> token count
-	lockedIPs   map[string]time.Time   // IP -> lockout expiration
+	lockedIPs    map[string]time.Time   // IP -> lockout expiration
 	mu           sync.RWMutex
 }
 
 const (
 	// CSRF token limits
-	maxCSRFTokensGlobal = 1000
+	maxCSRFTokensGlobal  = 1000
 	maxCSRFTokensPerIP   = 10
 	csrfTokenReuseWindow = 5 * time.Minute
 	csrfTokenLifetime    = 24 * time.Hour
-	
+
 	// Rate limiting
-	maxAuthAttemptsPerMinute = 5
-	maxRequestsPerMinute     = 30
+	maxAuthAttemptsPerMinute  = 5
+	maxRequestsPerMinute      = 30
 	bruteForceLockoutDuration = 15 * time.Minute
-	
+
 	// Request size limits
-	maxSystemPromptSize = 10 * 1024  // 10KB
-	maxConfigBodySize   = 50 * 1024  // 50KB
+	maxSystemPromptSize = 10 * 1024 // 10KB
+	maxConfigBodySize   = 50 * 1024 // 50KB
 )
 
 // Handler handles admin routes
 type Handler struct {
-	config       Config
-	logger       *logging.Logger
-	csrfTokens   map[string]*csrfTokenInfo // token -> info
+	config         Config
+	logger         *logging.Logger
+	csrfTokens     map[string]*csrfTokenInfo  // token -> info
 	csrfTokensByIP map[string]map[string]bool // IP -> set of tokens
-	csrfMutex    sync.RWMutex
-	rateLimiter  *adminRateLimiter
+	csrfMutex      sync.RWMutex
+	rateLimiter    *adminRateLimiter
 }
 
 // NewHandler creates a new admin handler
@@ -85,13 +85,13 @@ func NewHandler(logger *logging.Logger) *Handler {
 			Password: os.Getenv("ADMIN_PASSWORD"),
 		},
 		logger:         logger,
-		csrfTokens:      make(map[string]*csrfTokenInfo),
-		csrfTokensByIP:  make(map[string]map[string]bool),
+		csrfTokens:     make(map[string]*csrfTokenInfo),
+		csrfTokensByIP: make(map[string]map[string]bool),
 		rateLimiter: &adminRateLimiter{
 			authAttempts: make(map[string][]time.Time),
 			requests:     make(map[string][]time.Time),
 			csrfTokens:   make(map[string]int),
-			lockedIPs:   make(map[string]time.Time),
+			lockedIPs:    make(map[string]time.Time),
 		},
 	}
 	// Start cleanup goroutines
@@ -137,7 +137,7 @@ func getClientIP(r *http.Request) string {
 		} else {
 			ip = strings.TrimSpace(forwarded)
 		}
-		
+
 		// Remove port if present
 		if strings.HasPrefix(ip, "[") {
 			// IPv6 with brackets
@@ -152,7 +152,7 @@ func getClientIP(r *http.Request) string {
 		}
 		return ip
 	}
-	
+
 	// Final fallback to RemoteAddr (remove port if present)
 	addr := r.RemoteAddr
 	if strings.HasPrefix(addr, "[") {
@@ -191,26 +191,26 @@ func generateNonce() string {
 func (h *Handler) generateCSRFToken(r *http.Request) string {
 	ip := getClientIP(r)
 	userAgent := r.Header.Get("User-Agent")
-	
+
 	bytes := make([]byte, 32)
 	if _, err := rand.Read(bytes); err != nil {
 		log.Printf("Error generating CSRF token: %v", err)
 		return ""
 	}
 	token := base64.URLEncoding.EncodeToString(bytes)
-	
+
 	now := time.Now()
-	
+
 	h.csrfMutex.Lock()
 	defer h.csrfMutex.Unlock()
-	
+
 	// Check per-IP limit
 	ipTokens := h.csrfTokensByIP[ip]
 	if ipTokens == nil {
 		ipTokens = make(map[string]bool)
 		h.csrfTokensByIP[ip] = ipTokens
 	}
-	
+
 	// Enforce per-IP limit (LRU eviction)
 	if len(ipTokens) >= maxCSRFTokensPerIP {
 		// Find oldest token for this IP
@@ -229,7 +229,7 @@ func (h *Handler) generateCSRFToken(r *http.Request) string {
 			delete(ipTokens, oldestToken)
 		}
 	}
-	
+
 	// Enforce global limit (LRU eviction)
 	if len(h.csrfTokens) >= maxCSRFTokensGlobal {
 		// Find oldest token globally
@@ -254,7 +254,7 @@ func (h *Handler) generateCSRFToken(r *http.Request) string {
 			delete(h.csrfTokens, oldestToken)
 		}
 	}
-	
+
 	// Create new token
 	h.csrfTokens[token] = &csrfTokenInfo{
 		Token:     token,
@@ -265,7 +265,7 @@ func (h *Handler) generateCSRFToken(r *http.Request) string {
 		LastUsed:  now,
 	}
 	ipTokens[token] = true
-	
+
 	return token
 }
 
@@ -274,40 +274,40 @@ func (h *Handler) validateCSRFToken(token string, r *http.Request) bool {
 	if token == "" {
 		return false
 	}
-	
+
 	ip := getClientIP(r)
 	userAgent := r.Header.Get("User-Agent")
 	now := time.Now()
-	
+
 	h.csrfMutex.Lock()
 	defer h.csrfMutex.Unlock()
-	
+
 	info, exists := h.csrfTokens[token]
 	if !exists {
 		return false
 	}
-	
+
 	// Check if token is expired
 	if now.After(info.ExpiresAt) {
 		// Token expired, remove it
 		h.removeToken(token)
 		return false
 	}
-	
+
 	// Verify IP and User-Agent match (session validation)
 	if info.IP != ip || info.UserAgent != userAgent {
 		// IP or User-Agent changed - invalidate token
 		h.removeToken(token)
 		return false
 	}
-	
+
 	// Check if token can be reused (within 5-minute window from last use)
 	if now.Sub(info.LastUsed) > csrfTokenReuseWindow {
 		// Reuse window expired - token must be regenerated
 		h.removeToken(token)
 		return false
 	}
-	
+
 	// Token is valid - update last used time (allow reuse)
 	info.LastUsed = now
 	return true
@@ -332,7 +332,7 @@ func (h *Handler) removeToken(token string) {
 func (h *Handler) cleanupExpiredTokens() {
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
-	
+
 	for range ticker.C {
 		h.csrfMutex.Lock()
 		now := time.Now()
@@ -353,12 +353,12 @@ func (h *Handler) cleanupExpiredTokens() {
 func (rl *adminRateLimiter) cleanup() {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
-	
+
 	for range ticker.C {
 		rl.mu.Lock()
 		now := time.Now()
 		oneHourAgo := now.Add(-1 * time.Hour)
-		
+
 		// Clean up old auth attempts
 		for ip, attempts := range rl.authAttempts {
 			validAttempts := []time.Time{}
@@ -373,7 +373,7 @@ func (rl *adminRateLimiter) cleanup() {
 				rl.authAttempts[ip] = validAttempts
 			}
 		}
-		
+
 		// Clean up old requests
 		for ip, requests := range rl.requests {
 			validRequests := []time.Time{}
@@ -388,14 +388,14 @@ func (rl *adminRateLimiter) cleanup() {
 				rl.requests[ip] = validRequests
 			}
 		}
-		
+
 		// Clean up expired lockouts
 		for ip, lockoutUntil := range rl.lockedIPs {
 			if now.After(lockoutUntil) {
 				delete(rl.lockedIPs, ip)
 			}
 		}
-		
+
 		rl.mu.Unlock()
 	}
 }
@@ -404,7 +404,7 @@ func (rl *adminRateLimiter) cleanup() {
 func (rl *adminRateLimiter) isIPLocked(ip string) bool {
 	rl.mu.RLock()
 	defer rl.mu.RUnlock()
-	
+
 	lockoutUntil, locked := rl.lockedIPs[ip]
 	return locked && time.Now().Before(lockoutUntil)
 }
@@ -413,10 +413,10 @@ func (rl *adminRateLimiter) isIPLocked(ip string) bool {
 func (rl *adminRateLimiter) recordFailedAuth(ip string) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
-	
+
 	now := time.Now()
 	oneMinuteAgo := now.Add(-1 * time.Minute)
-	
+
 	// Get recent attempts
 	attempts := rl.authAttempts[ip]
 	recentAttempts := []time.Time{}
@@ -425,11 +425,11 @@ func (rl *adminRateLimiter) recordFailedAuth(ip string) bool {
 			recentAttempts = append(recentAttempts, t)
 		}
 	}
-	
+
 	// Add current attempt
 	recentAttempts = append(recentAttempts, now)
 	rl.authAttempts[ip] = recentAttempts
-	
+
 	// Check if limit exceeded
 	if len(recentAttempts) >= maxAuthAttemptsPerMinute {
 		// Lock out IP
@@ -437,7 +437,7 @@ func (rl *adminRateLimiter) recordFailedAuth(ip string) bool {
 		log.Printf("Admin: IP %s locked out after %d failed auth attempts", ip, len(recentAttempts))
 		return false
 	}
-	
+
 	return true
 }
 
@@ -445,10 +445,10 @@ func (rl *adminRateLimiter) recordFailedAuth(ip string) bool {
 func (rl *adminRateLimiter) checkRequestRate(ip string) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
-	
+
 	now := time.Now()
 	oneMinuteAgo := now.Add(-1 * time.Minute)
-	
+
 	// Get recent requests
 	requests := rl.requests[ip]
 	recentRequests := []time.Time{}
@@ -457,12 +457,12 @@ func (rl *adminRateLimiter) checkRequestRate(ip string) bool {
 			recentRequests = append(recentRequests, t)
 		}
 	}
-	
+
 	// Check if limit exceeded
 	if len(recentRequests) >= maxRequestsPerMinute {
 		return false
 	}
-	
+
 	// Add current request
 	recentRequests = append(recentRequests, now)
 	rl.requests[ip] = recentRequests
@@ -504,14 +504,14 @@ func (h *Handler) BasicAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Set security headers on all admin responses (no nonce needed for non-HTML responses)
 		setSecurityHeaders(w, "")
-		
+
 		if !h.IsEnabled() {
 			http.Error(w, "Admin interface not configured", http.StatusServiceUnavailable)
 			return
 		}
 
 		ip := getClientIP(r)
-		
+
 		// Check if IP is locked out
 		if h.rateLimiter.isIPLocked(ip) {
 			h.logAdminAction("auth_blocked_locked", ip, "IP locked out")
@@ -535,7 +535,7 @@ func (h *Handler) BasicAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			// Record failed authentication attempt
 			h.rateLimiter.recordFailedAuth(ip)
 			h.logAdminAction("auth_failed", ip, "Invalid credentials")
-			
+
 			w.Header().Set("WWW-Authenticate", `Basic realm="Clotilde Admin"`)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
@@ -551,7 +551,7 @@ func (h *Handler) BasicAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 
 		// Successful authentication
 		h.logAdminAction("auth_success", ip, r.URL.Path)
-		
+
 		next.ServeHTTP(w, r)
 	}
 }
@@ -560,16 +560,16 @@ func (h *Handler) BasicAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 func (h *Handler) HandleDashboard(w http.ResponseWriter, r *http.Request) {
 	ip := getClientIP(r)
 	h.logAdminAction("dashboard_view", ip, "")
-	
+
 	// Generate CSRF token for this session
 	csrfToken := h.generateCSRFToken(r)
-	
+
 	// Generate cryptographic nonce for CSP
 	nonce := generateNonce()
-	
+
 	// Set security headers with nonce
 	setSecurityHeaders(w, nonce)
-	
+
 	// Inject CSRF token and nonce into dashboard HTML
 	html := dashboardHTML
 	if csrfToken != "" {
@@ -580,7 +580,7 @@ func (h *Handler) HandleDashboard(w http.ResponseWriter, r *http.Request) {
 		// Replace nonce placeholder with actual nonce
 		html = strings.ReplaceAll(html, "{{NONCE}}", nonce)
 	}
-	
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(html))
 }
@@ -610,6 +610,10 @@ func (h *Handler) HandleLogs(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(query.Get("limit"))
 	if limit <= 0 {
 		limit = 50
+	}
+	// Enforce hard limit to prevent DoS
+	if limit > 1000 {
+		limit = 1000
 	}
 	offset, _ := strconv.Atoi(query.Get("offset"))
 
@@ -692,7 +696,7 @@ func (h *Handler) HandleLogs(w http.ResponseWriter, r *http.Request) {
 					if end > len(cloudEntries) {
 						end = len(cloudEntries)
 					}
-					
+
 					if source == "both" && len(entries) > 0 {
 						// Merge with in-memory entries (deduplicate by ID)
 						entryMap := make(map[string]bool)
@@ -722,10 +726,10 @@ func (h *Handler) HandleLogs(w http.ResponseWriter, r *http.Request) {
 
 	response := struct {
 		Entries   []logging.LogEntry `json:"entries"`
-		Count     int                 `json:"count"`
-		Offset    int                 `json:"offset"`
-		Limit     int                 `json:"limit"`
-		Total     int                 `json:"total"`
+		Count     int                `json:"count"`
+		Offset    int                `json:"offset"`
+		Limit     int                `json:"limit"`
+		Total     int                `json:"total"`
 		FromCloud bool               `json:"from_cloud,omitempty"`
 	}{
 		Entries:   entries,
@@ -744,7 +748,7 @@ func (h *Handler) HandleLogs(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleStats(w http.ResponseWriter, r *http.Request) {
 	ip := getClientIP(r)
 	h.logAdminAction("stats_view", ip, "")
-	
+
 	stats := h.logger.GetStats()
 
 	w.Header().Set("Content-Type", "application/json")
@@ -822,7 +826,7 @@ func (h *Handler) HandleSetConfig(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Base system prompt exceeds maximum size", http.StatusBadRequest)
 		return
 	}
-	
+
 	// Validate category prompts size
 	for category, prompt := range newConfig.CategoryPrompts {
 		if prompt != "" && len(prompt) > maxSystemPromptSize {
@@ -840,7 +844,7 @@ func (h *Handler) HandleSetConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Log successful config update
-	h.logAdminAction("config_updated", ip, fmt.Sprintf("standard_model=%s premium_model=%s prompt_len=%d", 
+	h.logAdminAction("config_updated", ip, fmt.Sprintf("standard_model=%s premium_model=%s prompt_len=%d",
 		newConfig.StandardModel, newConfig.PremiumModel, len(newConfig.SystemPrompt)))
 
 	// Return updated config
@@ -875,4 +879,3 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 		}
 	}))
 }
-
