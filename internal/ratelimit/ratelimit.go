@@ -128,17 +128,41 @@ func Middleware() func(http.Handler) http.Handler {
 }
 
 func getClientIP(r *http.Request) string {
-	// Check X-Forwarded-For header (Cloud Run sets this)
-	// Extract first IP only to prevent header spoofing bypass
+	// Check X-Real-IP header first (most trusted in Google Cloud Run)
+	// Cloud Run sets X-Real-IP reliably and strips user input, making it safe to trust
+	realIP := r.Header.Get("X-Real-IP")
+	if realIP != "" {
+		realIP = strings.TrimSpace(realIP)
+		// Remove port if present
+		if strings.HasPrefix(realIP, "[") {
+			// IPv6 with brackets
+			if idx := strings.Index(realIP, "]:"); idx != -1 {
+				realIP = realIP[:idx+1]
+			}
+		} else {
+			// IPv4 or IPv6 without brackets
+			if idx := strings.Index(realIP, ":"); idx != -1 {
+				realIP = realIP[:idx]
+			}
+		}
+		return realIP
+	}
+
+	// Fallback to X-Forwarded-For header (Cloud Run appends real IP to existing header)
+	// In Cloud Run: if attacker sends "X-Forwarded-For: 1.2.3.4", Cloud Run appends real IP
+	// Result: "1.2.3.4, <Real-IP>". We must take the RIGHTmost IP (after trusted proxies)
 	forwarded := r.Header.Get("X-Forwarded-For")
 	if forwarded != "" {
-		// Take only the first IP (original client)
-		// X-Forwarded-For can contain: "client, proxy1, proxy2"
-		if idx := strings.Index(forwarded, ","); idx != -1 {
-			forwarded = strings.TrimSpace(forwarded[:idx])
+		// Extract rightmost IP (most recent, added by Cloud Run)
+		// X-Forwarded-For format: "client, proxy1, proxy2" or "spoofed, real-ip"
+		ips := strings.Split(forwarded, ",")
+		if len(ips) > 0 {
+			// Take the last (rightmost) IP
+			forwarded = strings.TrimSpace(ips[len(ips)-1])
 		} else {
 			forwarded = strings.TrimSpace(forwarded)
 		}
+		
 		// Remove port if present (e.g., "192.168.1.1:12345" -> "192.168.1.1")
 		// Handle IPv6 addresses with brackets (e.g., "[::1]:12345" -> "[::1]")
 		if strings.HasPrefix(forwarded, "[") {
@@ -155,17 +179,7 @@ func getClientIP(r *http.Request) string {
 		return forwarded
 	}
 
-	// Check X-Real-IP header
-	realIP := r.Header.Get("X-Real-IP")
-	if realIP != "" {
-		// Remove port if present
-		if idx := strings.Index(realIP, ":"); idx != -1 {
-			realIP = realIP[:idx]
-		}
-		return strings.TrimSpace(realIP)
-	}
-
-	// Fallback to RemoteAddr (format: "IP:port" or "[IPv6]:port")
+	// Final fallback to RemoteAddr (format: "IP:port" or "[IPv6]:port")
 	remoteAddr := r.RemoteAddr
 	if strings.HasPrefix(remoteAddr, "[") {
 		// IPv6 with brackets

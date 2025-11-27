@@ -173,44 +173,104 @@ roles/secretmanager.secretAccessor
 - **Headers**: Security headers via Cloud Run
 - **No HTTP**: Cloud Run only accepts HTTPS
 
-### 8. Secure Logging
+### 8. Logging and Data Retention
 
-**Implementation**: Metadata-only logging
+**Implementation**: Full content logging for debugging and monitoring
 
-**What is Logged**:
+**What IS Logged**:
+- Full user input (complete prompts/questions)
+- Full AI responses (complete output)
 - Request timestamp
-- IP address hash (not actual IP)
-- API key hash (not actual key)
-- Message length (not content)
-- Response length (not content)
+- IP address hash (not actual IP address)
+- Message length
+- Response time
+- Model used
+- Category (routing decision)
+- Status (success/error)
+- Error messages (if any)
 
-**What is NOT Logged**:
-- Full user prompts
-- API keys
-- Complete request/response bodies
-- Sensitive headers
+**Where Logs Are Stored**:
+1. **In-Memory Buffer**: Ring buffer with configurable size (default: 1000 entries, set via `LOG_BUFFER_SIZE` environment variable)
+   - Oldest entries are overwritten when buffer is full
+   - Accessible via admin dashboard at `/admin/logs`
+   - Lost on service restart
+2. **Google Cloud Logging**: Persistent storage in Google Cloud Logging
+   - All entries are sent to Cloud Logging asynchronously
+   - Log name: `clotilde-requests`
+   - Accessible via Cloud Logging console or admin dashboard
+
+**Data Retention**:
+- **In-Memory Buffer**: Limited by `LOG_BUFFER_SIZE` (default 1000 entries), oldest entries overwritten
+- **Cloud Logging**: Default 30 days (Google Cloud default retention period)
+  - Retention period can be configured in Cloud Logging settings
+  - Logs older than retention period are automatically deleted
+  - For longer retention, configure log sinks to export to BigQuery, Cloud Storage, or Pub/Sub
+
+**Access Controls**:
+1. **Admin Dashboard** (`/admin/logs`):
+   - Protected by HTTP Basic Authentication
+   - Requires admin username and password (set via `ADMIN_USER` and `ADMIN_PASSWORD` environment variables)
+   - Only authenticated admin users can view logs
+   - Logs displayed in detail view with full input/output content
+2. **Google Cloud Logging**:
+   - Requires IAM permissions to access:
+     - `roles/logging.viewer` - View logs in Cloud Logging console
+     - `roles/logging.privateLogViewer` - View logs with sensitive data
+   - Cloud Run service account needs `roles/logging.logWriter` to write logs
+   - Access is audited via Cloud Audit Logs
+
+**Compliance Considerations**:
+- **Full content logging**: User prompts and AI responses may contain:
+  - Personal Identifiable Information (PII)
+  - Sensitive business information
+  - Private conversations
+  - Health information
+- **Data Protection**: 
+  - Logs are encrypted at rest in Google Cloud Logging
+  - Logs are encrypted in transit (HTTPS)
+  - Access is restricted via IAM and Basic Auth
+- **Data Subject Rights**: 
+  - Users may request log deletion (requires manual deletion from Cloud Logging)
+  - Consider implementing log export/deletion capabilities for GDPR/CCPA compliance
+  - Retention period should align with legal requirements
 
 **Example Log Entry**:
-```
-Request received: IP=ip_12345, MessageLength=42
-Response generated: Length=156
+```json
+{
+  "id": "req_abc123",
+  "timestamp": "2025-01-15T10:30:00Z",
+  "ip_hash": "ip_12345",
+  "message_length": 42,
+  "model": "gpt-4o-mini",
+  "category": "web_search",
+  "response_time_ms": 1234,
+  "status": "success",
+  "input": "What are the latest news about AI?",
+  "output": "Here are the latest developments in AI..."
+}
 ```
 
 ### 9. Prompt Privacy
 
+**Current Implementation**:
+- Full prompts and responses ARE logged for debugging and monitoring purposes
+- Logs are stored in-memory (ring buffer) and Google Cloud Logging
+- Access is restricted via authentication and IAM
+
 **Protection Measures**:
-- No logging of full prompts
-- No data retention (stateless service)
-- HTTPS-only transmission
+- HTTPS-only transmission (all traffic encrypted in transit)
 - Secrets never in logs or error messages
-- No database or persistent storage
+- No database or persistent storage beyond Cloud Logging
+- Access controls via HTTP Basic Auth and IAM
+- Encrypted storage in Google Cloud Logging
 
 **Data Flow**:
 1. User speaks → Apple Shortcut
 2. Shortcut → HTTPS POST to Cloud Run
 3. Cloud Run → OpenAI API (HTTPS)
 4. Response → User via Shortcut
-5. No storage, no logging of content
+5. Request/Response logged to in-memory buffer and Cloud Logging
+6. Logs accessible via admin dashboard (authenticated) or Cloud Logging (IAM-protected)
 
 ### 10. DDoS Protection
 

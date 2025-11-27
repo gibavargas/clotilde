@@ -95,14 +95,15 @@ func TestGetClientIP_XForwardedFor(t *testing.T) {
 
 func TestGetClientIP_XForwardedFor_MultipleIPs(t *testing.T) {
 	// Critical security test: X-Forwarded-For can contain multiple IPs
-	// We must only use the first one (original client)
+	// In Cloud Run: if attacker sends "X-Forwarded-For: 1.2.3.4", Cloud Run appends real IP
+	// Result: "1.2.3.4, <Real-IP>". We must use the RIGHTmost IP (most recent, added by Cloud Run)
 	req := httptest.NewRequest("POST", "/chat", nil)
 	req.Header.Set("X-Forwarded-For", "192.168.1.1, 10.0.0.1, 172.16.0.1")
 	req.RemoteAddr = "127.0.0.1:12345"
 
 	ip := getClientIP(req)
-	if ip != "192.168.1.1" {
-		t.Errorf("Expected 192.168.1.1 (first IP), got %s", ip)
+	if ip != "172.16.0.1" {
+		t.Errorf("Expected 172.16.0.1 (rightmost IP, added by Cloud Run), got %s", ip)
 	}
 }
 
@@ -134,8 +135,8 @@ func TestGetClientIP_XForwardedFor_IPv6_Multiple(t *testing.T) {
 	req.RemoteAddr = "127.0.0.1:12345"
 
 	ip := getClientIP(req)
-	if ip != "[2001:db8::1]" {
-		t.Errorf("Expected [2001:db8::1] (first IPv6), got %s", ip)
+	if ip != "[2001:db8::2]" {
+		t.Errorf("Expected [2001:db8::2] (rightmost IPv6, added by Cloud Run), got %s", ip)
 	}
 }
 
@@ -145,8 +146,8 @@ func TestGetClientIP_XForwardedFor_Whitespace(t *testing.T) {
 	req.RemoteAddr = "127.0.0.1:12345"
 
 	ip := getClientIP(req)
-	if ip != "192.168.1.1" {
-		t.Errorf("Expected 192.168.1.1 (whitespace trimmed), got %s", ip)
+	if ip != "10.0.0.1" {
+		t.Errorf("Expected 10.0.0.1 (rightmost IP after whitespace trimmed), got %s", ip)
 	}
 }
 
@@ -158,6 +159,34 @@ func TestGetClientIP_XRealIP(t *testing.T) {
 	ip := getClientIP(req)
 	if ip != "192.168.1.2" {
 		t.Errorf("Expected 192.168.1.2, got %s", ip)
+	}
+}
+
+func TestGetClientIP_XRealIP_Precedence(t *testing.T) {
+	// Critical security test: X-Real-IP should take precedence over X-Forwarded-For
+	// X-Real-IP is set by Cloud Run and is more trustworthy
+	req := httptest.NewRequest("POST", "/chat", nil)
+	req.Header.Set("X-Real-IP", "192.168.1.2")
+	req.Header.Set("X-Forwarded-For", "1.2.3.4, 5.6.7.8") // Spoofed IPs
+	req.RemoteAddr = "10.0.0.1:12345"
+
+	ip := getClientIP(req)
+	if ip != "192.168.1.2" {
+		t.Errorf("Expected 192.168.1.2 (X-Real-IP takes precedence), got %s", ip)
+	}
+}
+
+func TestGetClientIP_XForwardedFor_SpoofingScenario(t *testing.T) {
+	// Test the actual attack scenario: attacker sends X-Forwarded-For with spoofed IP
+	// Cloud Run appends real IP, resulting in "spoofed, real-ip"
+	// We must use the rightmost (real) IP
+	req := httptest.NewRequest("POST", "/chat", nil)
+	req.Header.Set("X-Forwarded-For", "1.2.3.4, 192.168.1.1") // Attacker spoofed 1.2.3.4, Cloud Run added 192.168.1.1
+	req.RemoteAddr = "10.0.0.1:12345"
+
+	ip := getClientIP(req)
+	if ip != "192.168.1.1" {
+		t.Errorf("Expected 192.168.1.1 (rightmost IP, real IP added by Cloud Run), got %s", ip)
 	}
 }
 

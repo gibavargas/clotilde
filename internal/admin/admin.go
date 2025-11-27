@@ -1,6 +1,7 @@
 package admin
 
 import (
+	_ "embed"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -20,6 +21,9 @@ import (
 
 	"github.com/clotilde/carplay-assistant/internal/logging"
 )
+
+//go:embed dashboard.js
+var dashboardJS string
 
 // Config holds admin configuration
 type Config struct {
@@ -98,26 +102,69 @@ func NewHandler(logger *logging.Logger) *Handler {
 
 // getClientIP extracts client IP from request
 func getClientIP(r *http.Request) string {
-	// Check X-Forwarded-For header (Cloud Run sets this)
-	forwarded := r.Header.Get("X-Forwarded-For")
-	if forwarded != "" {
-		// Take only the first IP (original client) to prevent header spoofing
-		if idx := strings.Index(forwarded, ","); idx != -1 {
-			return strings.TrimSpace(forwarded[:idx])
-		}
-		return strings.TrimSpace(forwarded)
-	}
-	
-	// Check X-Real-IP header
+	// Check X-Real-IP header first (most trusted in Google Cloud Run)
+	// Cloud Run sets X-Real-IP reliably and strips user input, making it safe to trust
 	realIP := r.Header.Get("X-Real-IP")
 	if realIP != "" {
-		return strings.TrimSpace(realIP)
+		realIP = strings.TrimSpace(realIP)
+		// Remove port if present
+		if strings.HasPrefix(realIP, "[") {
+			// IPv6 with brackets
+			if idx := strings.Index(realIP, "]:"); idx != -1 {
+				realIP = realIP[:idx+1]
+			}
+		} else {
+			// IPv4 or IPv6 without brackets
+			if idx := strings.Index(realIP, ":"); idx != -1 {
+				realIP = realIP[:idx]
+			}
+		}
+		return realIP
+	}
+
+	// Fallback to X-Forwarded-For header (Cloud Run appends real IP to existing header)
+	// In Cloud Run: if attacker sends "X-Forwarded-For: 1.2.3.4", Cloud Run appends real IP
+	// Result: "1.2.3.4, <Real-IP>". We must take the RIGHTmost IP (after trusted proxies)
+	forwarded := r.Header.Get("X-Forwarded-For")
+	if forwarded != "" {
+		// Extract rightmost IP (most recent, added by Cloud Run)
+		// X-Forwarded-For format: "client, proxy1, proxy2" or "spoofed, real-ip"
+		ips := strings.Split(forwarded, ",")
+		var ip string
+		if len(ips) > 0 {
+			// Take the last (rightmost) IP
+			ip = strings.TrimSpace(ips[len(ips)-1])
+		} else {
+			ip = strings.TrimSpace(forwarded)
+		}
+		
+		// Remove port if present
+		if strings.HasPrefix(ip, "[") {
+			// IPv6 with brackets
+			if idx := strings.Index(ip, "]:"); idx != -1 {
+				ip = ip[:idx+1]
+			}
+		} else {
+			// IPv4 or IPv6 without brackets
+			if idx := strings.Index(ip, ":"); idx != -1 {
+				ip = ip[:idx]
+			}
+		}
+		return ip
 	}
 	
-	// Fallback to RemoteAddr (remove port if present)
+	// Final fallback to RemoteAddr (remove port if present)
 	addr := r.RemoteAddr
-	if idx := strings.LastIndex(addr, ":"); idx != -1 {
-		addr = addr[:idx]
+	if strings.HasPrefix(addr, "[") {
+		// IPv6 with brackets
+		if idx := strings.Index(addr, "]:"); idx != -1 {
+			addr = addr[:idx+1]
+		}
+	} else {
+		// IPv4 or IPv6 without brackets
+		if idx := strings.LastIndex(addr, ":"); idx != -1 {
+			addr = addr[:idx]
+		}
 	}
 	return addr
 }
@@ -418,7 +465,9 @@ func (h *Handler) IsEnabled() bool {
 
 // setSecurityHeaders sets security headers on admin responses
 func setSecurityHeaders(w http.ResponseWriter) {
-	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:;")
+	// CSP: Removed 'unsafe-inline' from script-src to prevent XSS attacks
+	// JavaScript is now served from external file (/admin/static/dashboard.js)
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:;")
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("X-XSS-Protection", "1; mode=block")
@@ -505,6 +554,15 @@ func (h *Handler) HandleDashboard(w http.ResponseWriter, r *http.Request) {
 	
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(html))
+}
+
+// HandleDashboardJS serves the dashboard JavaScript file
+func (h *Handler) HandleDashboardJS(w http.ResponseWriter, r *http.Request) {
+	// Serve the embedded JavaScript file
+	// CSRF token is passed via data-csrf-token attribute on the script tag in HTML
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Write([]byte(dashboardJS))
 }
 
 // replaceCSRFToken injects CSRF token into dashboard HTML
@@ -775,6 +833,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 		h.HandleDashboard(w, r)
 	}))
 	mux.HandleFunc("/admin/", h.BasicAuthMiddleware(h.HandleDashboard))
+	mux.HandleFunc("/admin/static/dashboard.js", h.BasicAuthMiddleware(h.HandleDashboardJS))
 	mux.HandleFunc("/admin/logs", h.BasicAuthMiddleware(h.HandleLogs))
 	mux.HandleFunc("/admin/stats", h.BasicAuthMiddleware(h.HandleStats))
 	mux.HandleFunc("/admin/config", h.BasicAuthMiddleware(func(w http.ResponseWriter, r *http.Request) {

@@ -78,57 +78,75 @@ OPTIONS requests have no body, so `json.Unmarshal` would fail, blocking all CORS
 
 **Severity**: 🔴 Critical  
 **Impact**: Attackers can bypass rate limiting by spoofing IP addresses  
-**Files Affected**: `internal/ratelimit/ratelimit.go`
+**Files Affected**: `internal/ratelimit/ratelimit.go`, `internal/admin/admin.go`
 
 #### Why This Was Found
 
-During review of the rate limiting implementation, I identified several issues:
-1. The code blindly trusted `X-Forwarded-For` header without validation
-2. `X-Forwarded-For` can contain multiple IPs: `"client, proxy1, proxy2"`
-3. The code used the entire string as the rate limit key, not just the client IP
-4. An attacker could send unique `X-Forwarded-For` values to bypass rate limits entirely
+During review of the rate limiting implementation, I identified a critical vulnerability:
+1. The code took the LEFTmost IP from `X-Forwarded-For` header
+2. In Google Cloud Run, if an attacker sends `X-Forwarded-For: 1.2.3.4`, Cloud Run appends the real IP
+3. Result: `X-Forwarded-For: "1.2.3.4, <Real-IP>"`
+4. The code trusted `1.2.3.4` (spoofed) instead of `<Real-IP>` (actual client)
 
 #### The Problem
 
 ```go
-// BEFORE: Blindly trusted X-Forwarded-For
-forwarded := r.Header.Get("X-Forwarded-For")
-if forwarded != "" {
-    return forwarded  // Returns entire string, including multiple IPs!
-}
-```
-
-**Attack Scenario**:
-- Attacker sends: `X-Forwarded-For: unique-ip-1`
-- Next request: `X-Forwarded-For: unique-ip-2`
-- Each request gets a different rate limit key → unlimited requests
-
-#### The Fix
-
-**Why this fix was chosen**:
-- The first (leftmost) IP in `X-Forwarded-For` is the original client IP
-- This is the standard way to extract client IP from proxy headers
-- We also handle IPv6 addresses and port removal properly
-
-**Implementation**:
-```go
-// Extract first IP only to prevent header spoofing bypass
+// BEFORE: Took leftmost IP (vulnerable to spoofing in Cloud Run)
 forwarded := r.Header.Get("X-Forwarded-For")
 if forwarded != "" {
     // Take only the first IP (original client)
     if idx := strings.Index(forwarded, ","); idx != -1 {
-        return strings.TrimSpace(forwarded[:idx])
+        forwarded = strings.TrimSpace(forwarded[:idx])  // Takes 1.2.3.4 (spoofed!)
     }
-    return strings.TrimSpace(forwarded)
+    return forwarded
 }
 ```
 
-**Additional Improvements**:
-- Proper IPv6 handling (bracket notation: `[::1]:port`)
-- Port removal from `RemoteAddr` fallback
-- Whitespace trimming
+**Attack Scenario**:
+- Attacker sends: `X-Forwarded-For: 1.2.3.4` (spoofed IP)
+- Cloud Run receives request and appends real IP: `"1.2.3.4, 192.168.1.1"`
+- Code extracts leftmost IP: `1.2.3.4` (spoofed)
+- Attacker can bypass rate limits by randomizing the spoofed IP
 
-**Result**: Rate limiting now works correctly even when attackers try to spoof headers.
+#### The Fix
+
+**Why this fix was chosen**:
+- **X-Real-IP**: Google Cloud Run sets this header reliably and strips user input, making it safe to trust
+- **Rightmost IP from X-Forwarded-For**: In Cloud Run, the real client IP is appended to the existing header, so it's the rightmost entry
+- **Fallback order**: X-Real-IP → X-Forwarded-For (rightmost) → RemoteAddr
+
+**Implementation**:
+```go
+// Check X-Real-IP first (most trusted in Google Cloud Run)
+realIP := r.Header.Get("X-Real-IP")
+if realIP != "" {
+    // X-Real-IP is set by Cloud Run and is safe to trust
+    return parseIP(realIP)
+}
+
+// Fallback to X-Forwarded-For (take RIGHTmost IP, not leftmost)
+forwarded := r.Header.Get("X-Forwarded-For")
+if forwarded != "" {
+    // Extract rightmost IP (most recent, added by Cloud Run)
+    // Format: "spoofed-ip, real-ip" → we want "real-ip"
+    ips := strings.Split(forwarded, ",")
+    if len(ips) > 0 {
+        return parseIP(strings.TrimSpace(ips[len(ips)-1]))  // Rightmost IP
+    }
+}
+
+// Final fallback to RemoteAddr
+return parseIP(r.RemoteAddr)
+```
+
+**Key Changes**:
+1. **X-Real-IP takes precedence**: Most trusted header in Cloud Run
+2. **Rightmost IP from X-Forwarded-For**: Cloud Run appends real IP, so it's the last entry
+3. Proper IPv6 handling (bracket notation: `[::1]:port`)
+4. Port removal from all IP sources
+5. Whitespace trimming
+
+**Result**: Rate limiting now correctly identifies the real client IP even when attackers try to spoof headers. The fix prevents IP-based rate limit bypass and admin brute-force lockout bypass.
 
 ---
 

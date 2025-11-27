@@ -486,8 +486,10 @@ Changes take effect immediately for all new requests.
 ### Security
 
 - Protected by HTTP Basic Auth (separate from API key authentication)
-- No sensitive data stored in logs (only metadata like message length, IP hash)
+- Full user input and AI responses are logged for debugging and monitoring (stored in-memory buffer and Google Cloud Logging)
+- Logs are protected by authentication (admin dashboard) and IAM (Cloud Logging)
 - Admin credentials should be stored securely (use Secret Manager in production)
+- See `docs/SECURITY.md` for detailed information about data retention and access controls
 
 ## Security Features
 
