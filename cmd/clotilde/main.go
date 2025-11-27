@@ -891,10 +891,22 @@ func (s *Server) makeOpenAIRequest(ctx context.Context, reqBody ResponsesAPIRequ
 		}
 	}
 
+	// Ensure Store is always set to true for logging
+	if reqBody.Store == nil {
+		store := true
+		reqBody.Store = &store
+	} else {
+		*reqBody.Store = true // Force to true to ensure logging is enabled
+	}
+
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal request: %w", err)
 	}
+
+	// Log request details (without sensitive data) for debugging
+	log.Printf("OpenAI Responses API request: model=%s, store=%v, has_tools=%v", 
+		reqBody.Model, reqBody.Store != nil && *reqBody.Store, len(reqBody.Tools) > 0)
 
 	// Create HTTP request to Responses API
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", "https://api.openai.com/v1/responses", bytes.NewBuffer(jsonData))
