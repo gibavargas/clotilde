@@ -72,10 +72,16 @@ if ! gcloud secrets describe $OPENAI_SECRET &>/dev/null; then
     echo -n "Enter your OpenAI API key: "
     read -s OPENAI_KEY
     echo ""
-    echo -n "$OPENAI_KEY" | gcloud secrets create $OPENAI_SECRET \
-        --data-file=- \
+    # Use temporary file to avoid secrets in shell history
+    TEMP_FILE=$(mktemp)
+    trap "rm -f $TEMP_FILE" EXIT
+    printf '%s' "$OPENAI_KEY" > "$TEMP_FILE"
+    gcloud secrets create $OPENAI_SECRET \
+        --data-file="$TEMP_FILE" \
         --replication-policy="automatic" \
         --quiet
+    rm -f "$TEMP_FILE"
+    trap - EXIT
     echo "✓ OpenAI API key secret created ($OPENAI_SECRET)"
 else
     echo "✓ OpenAI API key secret already exists ($OPENAI_SECRET)"
@@ -86,10 +92,16 @@ if ! gcloud secrets describe $API_SECRET &>/dev/null; then
     echo -n "Enter your Clotilde API key (for authenticating requests): "
     read -s CLOTILDE_KEY
     echo ""
-    echo -n "$CLOTILDE_KEY" | gcloud secrets create $API_SECRET \
-        --data-file=- \
+    # Use temporary file to avoid secrets in shell history
+    TEMP_FILE=$(mktemp)
+    trap "rm -f $TEMP_FILE" EXIT
+    printf '%s' "$CLOTILDE_KEY" > "$TEMP_FILE"
+    gcloud secrets create $API_SECRET \
+        --data-file="$TEMP_FILE" \
         --replication-policy="automatic" \
         --quiet
+    rm -f "$TEMP_FILE"
+    trap - EXIT
     echo "✓ Clotilde API key secret created ($API_SECRET)"
 else
     echo "✓ Clotilde API key secret already exists ($API_SECRET)"
@@ -104,10 +116,16 @@ if ! gcloud secrets describe $PERPLEXITY_SECRET &>/dev/null; then
     read -s PERPLEXITY_KEY
     echo ""
     if [ ! -z "$PERPLEXITY_KEY" ]; then
-        echo -n "$PERPLEXITY_KEY" | gcloud secrets create $PERPLEXITY_SECRET \
-            --data-file=- \
+        # Use temporary file to avoid secrets in shell history
+        TEMP_FILE=$(mktemp)
+        trap "rm -f $TEMP_FILE" EXIT
+        printf '%s' "$PERPLEXITY_KEY" > "$TEMP_FILE"
+        gcloud secrets create $PERPLEXITY_SECRET \
+            --data-file="$TEMP_FILE" \
             --replication-policy="automatic" \
             --quiet
+        rm -f "$TEMP_FILE"
+        trap - EXIT
         echo "✓ Perplexity API key secret created ($PERPLEXITY_SECRET)"
         echo "PERPLEXITY_SECRET=$PERPLEXITY_SECRET"
     else

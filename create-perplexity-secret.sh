@@ -34,18 +34,30 @@ echo "Project: $PROJECT_ID"
 
 # Create secret
 if ! gcloud secrets describe $PERPLEXITY_SECRET --project=$PROJECT_ID &>/dev/null; then
-    echo -n "$PERPLEXITY_API_KEY" | gcloud secrets create $PERPLEXITY_SECRET \
+    # Use temporary file to avoid secrets in shell history
+    TEMP_FILE=$(mktemp)
+    trap "rm -f $TEMP_FILE" EXIT
+    printf '%s' "$PERPLEXITY_API_KEY" > "$TEMP_FILE"
+    gcloud secrets create $PERPLEXITY_SECRET \
         --project=$PROJECT_ID \
-        --data-file=- \
+        --data-file="$TEMP_FILE" \
         --replication-policy="automatic" \
         --quiet
+    rm -f "$TEMP_FILE"
+    trap - EXIT
     echo "✓ Perplexity API key secret created: $PERPLEXITY_SECRET"
 else
     echo "⚠ Secret $PERPLEXITY_SECRET already exists. Updating..."
-    echo -n "$PERPLEXITY_API_KEY" | gcloud secrets versions add $PERPLEXITY_SECRET \
+    # Use temporary file to avoid secrets in shell history
+    TEMP_FILE=$(mktemp)
+    trap "rm -f $TEMP_FILE" EXIT
+    printf '%s' "$PERPLEXITY_API_KEY" > "$TEMP_FILE"
+    gcloud secrets versions add $PERPLEXITY_SECRET \
         --project=$PROJECT_ID \
-        --data-file=- \
+        --data-file="$TEMP_FILE" \
         --quiet
+    rm -f "$TEMP_FILE"
+    trap - EXIT
     echo "✓ Perplexity API key secret updated: $PERPLEXITY_SECRET"
 fi
 

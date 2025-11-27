@@ -54,11 +54,17 @@ else
     echo -n "  Enter your OpenAI API key: "
     read -s OPENAI_KEY
     echo ""
-    echo -n "$OPENAI_KEY" | gcloud secrets create $OPENAI_SECRET_NEW \
-        --data-file=- \
+    # Use temporary file to avoid secrets in shell history
+    TEMP_FILE=$(mktemp)
+    trap "rm -f $TEMP_FILE" EXIT
+    printf '%s' "$OPENAI_KEY" > "$TEMP_FILE"
+    gcloud secrets create $OPENAI_SECRET_NEW \
+        --data-file="$TEMP_FILE" \
         --replication-policy="automatic" \
         --project=$PROJECT_ID \
         --quiet
+    rm -f "$TEMP_FILE"
+    trap - EXIT
     echo "  ✓ Created with new value"
 fi
 
@@ -79,11 +85,17 @@ else
     echo -n "  Enter your API key: "
     read -s API_KEY
     echo ""
-    echo -n "$API_KEY" | gcloud secrets create $API_SECRET_NEW \
-        --data-file=- \
+    # Use temporary file to avoid secrets in shell history
+    TEMP_FILE=$(mktemp)
+    trap "rm -f $TEMP_FILE" EXIT
+    printf '%s' "$API_KEY" > "$TEMP_FILE"
+    gcloud secrets create $API_SECRET_NEW \
+        --data-file="$TEMP_FILE" \
         --replication-policy="automatic" \
         --project=$PROJECT_ID \
-            --quiet
+        --quiet
+    rm -f "$TEMP_FILE"
+    trap - EXIT
     echo "  ✓ Created with new value"
 fi
 

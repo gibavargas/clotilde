@@ -5,6 +5,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/clotilde/carplay-assistant/internal/auth"
 )
 
 type rateLimiter struct {
@@ -17,19 +19,29 @@ var (
 		requests: make(map[string][]time.Time),
 	}
 	
+	// Pre-auth IP-based rate limiter for brute force protection
+	preAuthLimiter = &rateLimiter{
+		requests: make(map[string][]time.Time),
+	}
+	
 	// Rate limits
 	requestsPerMinute = 10
 	requestsPerHour   = 100
 	cleanupInterval   = 5 * time.Minute
+	
+	// Pre-auth rate limits (stricter to prevent brute force)
+	preAuthRequestsPerMinute = 5  // Lower limit before authentication
+	preAuthRequestsPerHour   = 20 // Lower hourly limit
 )
 
 func init() {
-	// Start cleanup goroutine
+	// Start cleanup goroutines
 	go func() {
 		ticker := time.NewTicker(cleanupInterval)
 		defer ticker.Stop()
 		for range ticker.C {
 			globalLimiter.cleanup()
+			preAuthLimiter.cleanup()
 		}
 	}()
 }
@@ -59,6 +71,10 @@ func (rl *rateLimiter) cleanup() {
 }
 
 func (rl *rateLimiter) isAllowed(key string) bool {
+	return rl.isAllowedWithLimits(key, requestsPerMinute, requestsPerHour)
+}
+
+func (rl *rateLimiter) isAllowedWithLimits(key string, perMinute, perHour int) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
@@ -85,10 +101,10 @@ func (rl *rateLimiter) isAllowed(key string) bool {
 	}
 
 	// Check limits
-	if minuteCount >= requestsPerMinute {
+	if minuteCount >= perMinute {
 		return false
 	}
-	if hourCount >= requestsPerHour {
+	if hourCount >= perHour {
 		return false
 	}
 
@@ -97,7 +113,9 @@ func (rl *rateLimiter) isAllowed(key string) bool {
 	return true
 }
 
-// Middleware implements rate limiting per IP address
+// Middleware implements rate limiting per validated API key or IP address
+// IMPORTANT: This middleware must run AFTER auth.Middleware to ensure API keys are validated
+// Only validated API keys (from context) are used for rate limiting to prevent bypass attacks
 func Middleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -107,13 +125,18 @@ func Middleware() func(http.Handler) http.Handler {
 				return
 			}
 
-			// Use IP address as key
-			ip := getClientIP(r)
-			apiKey := r.Header.Get("X-API-Key")
+			// Get validated API key from context (set by auth.Middleware)
+			// Only use API key if it has been validated to prevent rate limit bypass
+			validatedAPIKey := auth.GetValidatedAPIKey(r.Context())
 			
-			// Use API key if available, otherwise use IP
-			key := apiKey
-			if key == "" {
+			var key string
+			if validatedAPIKey != "" {
+				// Use validated API key for rate limiting
+				key = validatedAPIKey
+			} else {
+				// Fallback to IP address if no validated API key
+				// This should only happen if auth middleware was skipped
+				ip := getClientIP(r)
 				key = ip
 			}
 
@@ -193,5 +216,31 @@ func getClientIP(r *http.Request) string {
 		}
 	}
 	return remoteAddr
+}
+
+// PreAuthMiddleware implements IP-based rate limiting BEFORE authentication
+// This protects against brute force attacks on the authentication endpoint
+// It runs before auth.Middleware and uses stricter limits
+func PreAuthMiddleware() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Skip pre-auth rate limiting for health check and admin routes
+			if r.URL.Path == "/health" || strings.HasPrefix(r.URL.Path, "/admin") {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Use IP address as key (no API key validation yet)
+			ip := getClientIP(r)
+
+			// Use stricter limits for pre-auth requests
+			if !preAuthLimiter.isAllowedWithLimits(ip, preAuthRequestsPerMinute, preAuthRequestsPerHour) {
+				http.Error(w, `{"error":"Too many requests"}`, http.StatusTooManyRequests)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 

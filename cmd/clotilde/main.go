@@ -344,15 +344,20 @@ func main() {
 	}
 	admin.SetDefaultCategoryPrompts(defaultCategoryPrompts)
 
-	// Middleware order (outer to inner): requestID → validator → auth → ratelimit
-	// 1. RequestID: Adds unique request ID for tracing
-	// 2. Validator: Limits request size early (prevents large payloads)
-	// 3. Auth: Validates API key before rate limiting
-	// 4. Ratelimit: Only rate-limits authenticated requests (by API key)
+	// Middleware order (execution order when request arrives):
+	// 1. PreAuth: IP-based rate limiting BEFORE authentication (prevents brute force)
+	// 2. RequestID: Adds unique request ID for tracing
+	// 3. Validator: Limits request size early (prevents large payloads)
+	// 4. Auth: Validates API key
+	// 5. RateLimit: Rate-limits using VALIDATED API keys (prevents bypass attacks)
+	//
+	// Note: In Go middleware wrapping, the last wrapped executes first.
+	// So we wrap in reverse order: RateLimit → Auth → Validator → RequestID → PreAuth → Mux
 	handler := logging.RequestIDMiddleware(mux)
 	handler = validator.Middleware()(handler)
-	handler = auth.Middleware(apiKeySecret)(handler)
-	handler = ratelimit.Middleware()(handler)
+	handler = ratelimit.PreAuthMiddleware()(handler) // IP-based, runs BEFORE auth
+	handler = auth.Middleware(apiKeySecret)(handler) // Validates API key, sets context
+	handler = ratelimit.Middleware()(handler)        // Uses validated API key from context
 
 	serverAddr := fmt.Sprintf(":%s", port)
 
@@ -552,19 +557,40 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 
 // logRequest adds a structured log entry with full input/output for Cloud Logging
 func (s *Server) logRequest(requestID string, r *http.Request, input, output, model, category string, responseTime time.Duration, status, errorMsg string) {
+	// Apply PII redaction if enabled
+	loggedInput := input
+	loggedOutput := output
+	if logging.IsRedactPIIEnabled() {
+		loggedInput = logging.RedactPII(input)
+		loggedOutput = logging.RedactPII(output)
+	}
+
+	// Check if full content logging is enabled
+	// If disabled, only log metadata (lengths, hashes, etc.)
+	var finalInput, finalOutput string
+	if logging.ShouldLogFullContent() {
+		finalInput = loggedInput
+		finalOutput = loggedOutput
+	} else {
+		// Full content logging disabled - only log metadata
+		// Input and Output fields will be empty, but lengths are preserved
+		finalInput = ""
+		finalOutput = ""
+	}
+
 	entry := logging.LogEntry{
 		ID:            requestID,
 		Timestamp:     time.Now(),
 		IPHash:        hashIP(r.RemoteAddr),
-		MessageLength: len(input),
+		MessageLength: len(input), // Always log original length, even if content is redacted
 		Model:         model,
 		Category:      category,
 		ResponseTime:  responseTime.Milliseconds(),
 		TokenEstimate: len(input) / 4, // Rough estimate: ~4 chars per token
 		Status:        status,
 		ErrorMessage:  errorMsg,
-		Input:         input,
-		Output:        output,
+		Input:         finalInput,
+		Output:        finalOutput,
 	}
 	s.logger.Add(entry)
 }
@@ -642,14 +668,32 @@ var (
 )
 
 // getIPHashSalt returns the salt for IP hashing, loading it once from environment variable
+// In production (Cloud Run), IP_HASH_SALT MUST be set or the application will fail to start
 func getIPHashSalt() string {
 	ipHashSaltOnce.Do(func() {
-		// Use environment variable if set, otherwise use a default constant salt
-		// For production, set IP_HASH_SALT environment variable to a unique secret
 		ipHashSalt = os.Getenv("IP_HASH_SALT")
+		
+		// Check if running in production (Cloud Run)
+		// Cloud Run sets GOOGLE_CLOUD_PROJECT, K_SERVICE, and K_REVISION
+		isProduction := os.Getenv("GOOGLE_CLOUD_PROJECT") != "" && 
+		               (os.Getenv("K_SERVICE") != "" || os.Getenv("K_REVISION") != "")
+		
 		if ipHashSalt == "" {
-			// Default salt (should be overridden in production via environment variable)
-			ipHashSalt = "clotilde-ip-hash-salt-default-change-in-production"
+			if isProduction {
+				// Production: fail to start if salt is not configured
+				log.Fatal("IP_HASH_SALT environment variable is required in production but is not set. " +
+					"Set IP_HASH_SALT to a cryptographically secure random string (e.g., 32+ characters).")
+			} else {
+				// Development: log severe warning but allow to continue
+				log.Printf("WARNING: IP_HASH_SALT is not set. Using a weak default salt. " +
+					"This is INSECURE and should NEVER be used in production. " +
+					"Set IP_HASH_SALT environment variable to a secure random string.")
+				ipHashSalt = "clotilde-ip-hash-salt-default-INSECURE-DEVELOPMENT-ONLY"
+			}
+		} else if len(ipHashSalt) < 16 {
+			// Warn if salt is too short
+			log.Printf("WARNING: IP_HASH_SALT is too short (%d characters). " +
+				"Recommend using at least 32 characters for better security.", len(ipHashSalt))
 		}
 	})
 	return ipHashSalt
