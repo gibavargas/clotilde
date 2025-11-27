@@ -323,12 +323,14 @@ func main() {
 	mux.HandleFunc("/api/config", server.handleConfigAPI)
 
 	// Register admin routes (protected by HTTP Basic Auth)
+	// Always register routes - BasicAuthMiddleware will handle the case when admin is not configured
+	// This prevents 404 errors and provides better user feedback
 	adminHandler := admin.NewHandler(logger)
+	adminHandler.RegisterRoutes(mux)
 	if adminHandler.IsEnabled() {
-		adminHandler.RegisterRoutes(mux)
 		log.Printf("Admin dashboard enabled at /admin/")
 	} else {
-		log.Printf("Admin dashboard disabled (ADMIN_USER and ADMIN_PASSWORD not set)")
+		log.Printf("Admin dashboard routes registered but disabled (ADMIN_USER and ADMIN_PASSWORD not set)")
 	}
 
 	// Initialize default runtime configuration with the base system prompt template

@@ -504,9 +504,31 @@ func (h *Handler) BasicAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Set security headers on all admin responses (no nonce needed for non-HTML responses)
 		setSecurityHeaders(w, "")
-
+		
 		if !h.IsEnabled() {
-			http.Error(w, "Admin interface not configured", http.StatusServiceUnavailable)
+			// Return proper error with instructions instead of 404
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			fmt.Fprintf(w, `<!DOCTYPE html>
+<html>
+<head>
+	<title>Admin Interface Not Configured</title>
+	<style>
+		body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
+		h1 { color: #d32f2f; }
+		code { background: #f5f5f5; padding: 2px 6px; border-radius: 3px; }
+	</style>
+</head>
+<body>
+	<h1>Admin Interface Not Configured</h1>
+	<p>The admin dashboard is not enabled. To enable it, set the following environment variables:</p>
+	<ul>
+		<li><code>ADMIN_USER</code> - Admin username</li>
+		<li><code>ADMIN_PASSWORD</code> - Admin password (stored in Secret Manager)</li>
+	</ul>
+	<p>After setting these variables, redeploy the service.</p>
+</body>
+</html>`)
 			return
 		}
 
