@@ -645,12 +645,14 @@ const dashboardHTML = `<!DOCTYPE html>
                 <div class="stat-subtitle">percentage</div>
             </div>
             <div class="stat-card">
-                <div class="stat-label">Model: Nano</div>
-                <div class="stat-value" id="modelNano">-</div>
+                <div class="stat-label">Standard Models</div>
+                <div class="stat-value" id="modelStandard">-</div>
+                <div class="stat-subtitle">Fast/cheap (Haiku, Mini)</div>
             </div>
             <div class="stat-card">
-                <div class="stat-label">Model: Full</div>
-                <div class="stat-value" id="modelFull">-</div>
+                <div class="stat-label">Premium Models</div>
+                <div class="stat-value" id="modelPremium">-</div>
+                <div class="stat-subtitle">Powerful (Sonnet, GPT-4o)</div>
             </div>
         </div>
 
@@ -669,8 +671,13 @@ const dashboardHTML = `<!DOCTYPE html>
                 <div class="form-group">
                     <label class="form-label">Standard Model (Simple/Fast)</label>
                     <select class="form-control" id="standardModel">
-                        <optgroup label="Confirmed Working">
-                            <option value="gpt-4o-mini">gpt-4o-mini (Recommended)</option>
+                        <optgroup label="Claude (Anthropic) - FAST ⚡">
+                            <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (FASTEST - Recommended for CarPlay)</option>
+                            <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>
+                            <option value="claude-3-5-haiku-latest">Claude 3.5 Haiku (Latest)</option>
+                        </optgroup>
+                        <optgroup label="OpenAI - GPT-4o">
+                            <option value="gpt-4o-mini">gpt-4o-mini</option>
                             <option value="gpt-4o">gpt-4o</option>
                             <option value="gpt-4-turbo">gpt-4-turbo</option>
                             <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
@@ -697,8 +704,15 @@ const dashboardHTML = `<!DOCTYPE html>
                 <div class="form-group">
                     <label class="form-label">Premium Model (Complex/Deep)</label>
                     <select class="form-control" id="premiumModel">
-                        <optgroup label="Confirmed Working">
-                            <option value="gpt-4o">gpt-4o (Recommended)</option>
+                        <optgroup label="Claude (Anthropic) - FAST ⚡">
+                            <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (FASTEST - Recommended for CarPlay)</option>
+                            <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet (Balanced)</option>
+                            <option value="claude-3-5-sonnet-latest">Claude 3.5 Sonnet (Latest)</option>
+                            <option value="claude-sonnet-4-20250514">Claude Sonnet 4 (Most Capable)</option>
+                            <option value="claude-3-opus-20240229">Claude 3 Opus (Highest Quality)</option>
+                        </optgroup>
+                        <optgroup label="OpenAI - GPT-4o">
+                            <option value="gpt-4o">gpt-4o</option>
                             <option value="gpt-4o-mini">gpt-4o-mini</option>
                             <option value="gpt-4-turbo">gpt-4-turbo</option>
                             <option value="gpt-4o-2024-08-06">gpt-4o-2024-08-06</option>
@@ -789,8 +803,21 @@ const dashboardHTML = `<!DOCTYPE html>
                 <div class="filters">
                     <select id="filterModel">
                         <option value="">All Models</option>
-                        <option value="gpt-4o-mini">Mini (cheap)</option>
-                        <option value="gpt-5.1">Full (gpt-5.1)</option>
+                        <optgroup label="Claude (Anthropic)">
+                            <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
+                            <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>
+                            <option value="claude-3-5-haiku-latest">Claude 3.5 Haiku (Latest)</option>
+                            <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
+                            <option value="claude-3-5-sonnet-latest">Claude 3.5 Sonnet (Latest)</option>
+                            <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
+                            <option value="claude-3-opus-20240229">Claude 3 Opus</option>
+                        </optgroup>
+                        <optgroup label="OpenAI">
+                            <option value="gpt-4o-mini">gpt-4o-mini</option>
+                            <option value="gpt-4o">gpt-4o</option>
+                            <option value="gpt-5.1">gpt-5.1</option>
+                            <option value="gpt-5">gpt-5</option>
+                        </optgroup>
                     </select>
                     <select id="filterStatus">
                         <option value="">All Status</option>

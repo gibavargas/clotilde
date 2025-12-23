@@ -3,6 +3,7 @@ package logging
 import (
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -36,23 +37,27 @@ type Stats struct {
 
 // ModelUsage tracks usage by model
 type ModelUsage struct {
-	Nano int64 `json:"nano"`
-	Full int64 `json:"full"`
+	Standard int64 `json:"standard"` // Fast/cheap models (gpt-4o-mini, Claude Haiku, etc.)
+	Premium  int64 `json:"premium"`  // Powerful/expensive models (gpt-4o, Claude Sonnet, etc.)
+	
+	// Legacy fields for backward compatibility
+	Nano int64 `json:"nano"` // Deprecated: use Standard
+	Full int64 `json:"full"` // Deprecated: use Premium
 }
 
 // Logger is a thread-safe ring buffer logger
 type Logger struct {
-	entries    []LogEntry
-	capacity   int
-	head       int
-	count      int
-	mu         sync.RWMutex
-	startTime  time.Time
-	totalCount int64
-	errorCount int64
-	totalTime  int64
-	nanoCount  int64
-	fullCount  int64
+	entries       []LogEntry
+	capacity      int
+	head          int
+	count         int
+	mu            sync.RWMutex
+	startTime     time.Time
+	totalCount    int64
+	errorCount    int64
+	totalTime     int64
+	standardCount int64 // Fast/cheap models
+	premiumCount  int64 // Powerful/expensive models
 }
 
 var (
@@ -97,11 +102,19 @@ func (l *Logger) Add(entry LogEntry) {
 		l.errorCount++
 	}
 
-	// Track model usage
-	if entry.Model == "gpt-4o-mini" {
-		l.nanoCount++
+	// Track model usage - categorize models as standard (fast/cheap) or premium (powerful/expensive)
+	// Standard models: gpt-4o-mini, Claude Haiku variants, gpt-3.5-turbo, etc.
+	// Premium models: gpt-4o, gpt-5, Claude Sonnet, Claude Opus, o1, o3, etc.
+	modelLower := strings.ToLower(entry.Model)
+	isStandard := strings.Contains(modelLower, "mini") ||
+		strings.Contains(modelLower, "haiku") ||
+		strings.Contains(modelLower, "nano") ||
+		strings.Contains(modelLower, "3.5-turbo")
+	
+	if isStandard {
+		l.standardCount++
 	} else {
-		l.fullCount++
+		l.premiumCount++
 	}
 
 	// Also send to Cloud Logging for persistence
@@ -206,8 +219,11 @@ func (l *Logger) GetStats() Stats {
 	stats := Stats{
 		TotalRequests: l.totalCount,
 		ModelUsage: ModelUsage{
-			Nano: l.nanoCount,
-			Full: l.fullCount,
+			Standard: l.standardCount,
+			Premium:  l.premiumCount,
+			// Legacy fields for backward compatibility
+			Nano: l.standardCount,
+			Full: l.premiumCount,
 		},
 		Uptime: time.Since(l.startTime).Round(time.Second).String(),
 	}

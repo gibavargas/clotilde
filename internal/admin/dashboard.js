@@ -58,8 +58,9 @@ async function loadStats() {
         document.getElementById('totalRequests').textContent = stats.total_requests.toLocaleString();
         document.getElementById('avgResponseTime').textContent = stats.avg_response_time_ms.toFixed(0);
         document.getElementById('errorRate').textContent = stats.error_rate.toFixed(2) + '%';
-        document.getElementById('modelNano').textContent = stats.model_usage.nano.toLocaleString();
-        document.getElementById('modelFull').textContent = stats.model_usage.full.toLocaleString();
+        // Use new field names (standard/premium) with fallback to legacy (nano/full)
+        document.getElementById('modelStandard').textContent = (stats.model_usage.standard || stats.model_usage.nano || 0).toLocaleString();
+        document.getElementById('modelPremium').textContent = (stats.model_usage.premium || stats.model_usage.full || 0).toLocaleString();
         document.getElementById('uptime').textContent = 'Up: ' + stats.uptime;
     } catch (error) {
         console.error('Failed to load stats:', error);
