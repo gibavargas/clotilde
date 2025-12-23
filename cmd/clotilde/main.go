@@ -930,14 +930,35 @@ func formatPerplexityResults(results []PerplexitySearchResult) string {
 // Claude models are preferred for speed-critical CarPlay scenarios
 // OpenAI Responses API has native web_search support for real-time information
 func (s *Server) createResponse(ctx context.Context, route RouteDecision, instructions, input string) (string, error) {
-	// Check if this is a Claude model - use Claude API directly (faster for CarPlay)
+	// Get current config to check Perplexity setting
+	config := admin.GetConfig()
+
+	// Check if this is a Claude model
 	if isClaudeModel(route.Model) && s.claudeAPIKey != "" {
+		// CRITICAL: If web search is needed, use Perplexity first to get real-time data
+		// We should NEVER rely on training data for recent information
+		if route.WebSearch {
+			if config.PerplexityEnabled && s.perplexityAPIKey != "" {
+				log.Printf("Using Perplexity Search API with Claude for web search (real-time data required)")
+				perplexityResults, err := s.performPerplexitySearch(ctx, input)
+				if err != nil {
+					log.Printf("Perplexity search failed: %v, using Claude without web search (WARNING: may be outdated)", err)
+					// Continue to Claude without web search results - user will get training data only
+				} else {
+					// Format Perplexity results and append to instructions
+					formattedResults := formatPerplexityResults(perplexityResults)
+					if formattedResults != "" {
+						instructions = fmt.Sprintf("%s\n\n%s", instructions, formattedResults)
+						log.Printf("Perplexity results appended to Claude instructions for real-time data")
+					}
+				}
+			} else {
+				log.Printf("WARNING: Web search needed but Perplexity not configured - Claude will use training data only (may be outdated)")
+			}
+		}
 		log.Printf("Using Claude API for fast response: model=%s", route.Model)
 		return s.makeClaudeRequest(ctx, route.Model, instructions, input)
 	}
-
-	// Get current config to check Perplexity setting
-	config := admin.GetConfig()
 
 	// Build request body for Responses API
 	store := true // Enable logging so usage appears in OpenAI logs
