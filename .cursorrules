@@ -1,0 +1,196 @@
+# Clotilde CarPlay Assistant - Cursor AI Rules
+
+## 🚨 CRITICAL DEPLOYMENT RULES (MUST ALWAYS FOLLOW)
+
+### 1. Admin Dashboard MUST Always Be Enabled
+- **NEVER deploy without admin dashboard enabled**
+- **ALWAYS check for ADMIN_USER and ADMIN_SECRET before deploying**
+- Admin dashboard enables runtime configuration (saves redeployment costs)
+- After deployment, verify admin returns HTTP 401 (not 503)
+- If admin not configured, help user set it up before deploying
+
+### 2. Build and Test Locally Before Deploying
+- **ALWAYS build Docker image locally first** (FREE - saves Cloud Build costs)
+- **ALWAYS test container locally if possible** before pushing
+- **ALWAYS push pre-built image** (don't build in cloud)
+- Local builds are FREE, Cloud Build costs money
+- Catch errors before deploying to save time and money
+
+### Deployment Checklist (Always Follow)
+Before deploying:
+1. ✅ Check ADMIN_USER and ADMIN_SECRET are set
+2. ✅ Build Docker image locally: `docker build -t $IMAGE_NAME .`
+3. ✅ Test container locally (optional but recommended)
+4. ✅ Verify code compiles: `go build ./cmd/clotilde`
+5. ✅ Push pre-built image: `docker push $IMAGE_NAME`
+
+After deploying:
+1. ✅ Verify admin: `curl -I https://<service-url>/admin/` (should return 401, not 503)
+2. ✅ Check health endpoint works
+3. ✅ Review Cloud Run logs for errors
+
+## 🔒 SECURITY RULES (CRITICAL)
+
+### Never Commit Secrets
+- **NEVER commit actual secret names or values to git**
+- **ALWAYS use placeholders** in documentation: `<your-secret-name>`, `XXXXXXXX`
+- **ALWAYS check git diff before committing** for secret patterns
+- Secret names pattern: `clotilde-.*-[a-f0-9]{8}`
+- API key patterns: `sk-.*`, long base64/hex strings
+
+### Secret Management
+- Secrets stored in Google Secret Manager, never in code
+- Use environment variables, not hardcoded values
+- Document how to find secrets, don't reveal actual names
+- If secrets accidentally committed, remove from git history immediately
+
+## 🧪 TESTING REQUIREMENTS
+
+### Before Committing
+- Code must compile: `go build ./cmd/clotilde`
+- Run tests if applicable: `go test ./...`
+- Check for linting errors
+- Verify no secrets in staged files
+
+### Test Coverage
+- Security-critical paths: 100% coverage required
+- New features: Must include tests
+- Bug fixes: Write test that reproduces bug, then fix
+
+## 📝 CODE QUALITY STANDARDS
+
+### Go Code Style
+- Follow Go conventions and idioms
+- Use meaningful variable names
+- Add comments for complex logic
+- Keep functions focused and small
+- Handle errors explicitly (no silent failures)
+
+### Error Handling
+- Always check errors, never ignore them
+- Provide helpful error messages
+- Log errors with context
+- Return appropriate HTTP status codes
+
+### Documentation
+- Update README.md for user-facing changes
+- Update docs/agents.md for deployment/architecture changes
+- Add code comments for non-obvious logic
+- Document breaking changes
+
+## 🚀 DEPLOYMENT WORKFLOW
+
+### Standard Deployment (Always Use)
+```bash
+# 1. Set required environment variables
+export OPENAI_SECRET=<your-openai-secret-name>
+export API_SECRET=<your-api-secret-name>
+export ADMIN_USER=admin
+export ADMIN_SECRET=<your-admin-password-secret-name>
+export CLAUDE_SECRET=<your-claude-secret-name>  # If using Claude
+
+# 2. Build locally (FREE)
+docker build -t $IMAGE_NAME .
+
+# 3. Test locally (optional)
+docker run -d --name test -p 8080:8080 $IMAGE_NAME
+curl http://localhost:8080/health
+docker stop test && docker rm test
+
+# 4. Push and deploy
+docker push $IMAGE_NAME
+./deploy.sh
+```
+
+### When User Says "Deploy"
+1. First: Check if admin credentials are set
+2. Second: Build Docker image locally
+3. Third: Test container locally (optional)
+4. Fourth: Push image to Artifact Registry
+5. Fifth: Deploy to Cloud Run
+6. Sixth: Verify admin dashboard is enabled (401, not 503)
+
+## 🎯 KEY ARCHITECTURE DECISIONS
+
+### Claude Integration
+- Claude Haiku 4.5 is default model (fastest for CarPlay)
+- Claude MUST use Perplexity for web search queries (real-time data)
+- Never rely on training data for recent information
+- Web search: Perplexity (8s) + Claude (1-3s) = 9-11s total
+
+### Timeout Configuration
+- Apple Shortcuts: ~30s HTTP timeout
+- Request context: 25s (leaves 5s buffer)
+- OpenAI calls: 20s
+- Perplexity: 8s
+- Claude: 15s (typically 1-3s)
+- Cloud Run: 30s (matches client)
+
+### Admin Dashboard
+- Always registered (prevents 404 errors)
+- Returns 401 when enabled (requires auth)
+- Returns 503 when disabled (helpful error page)
+- Never returns 404
+
+## 📚 IMPORTANT FILES
+
+### Documentation
+- `docs/agents.md` - Comprehensive deployment and architecture guide
+- `README.md` - User-facing documentation
+- `CHANGELOG_CLAUDE.md` - Claude integration details
+- `TESTING.md` - Testing guide
+
+### Configuration
+- `deploy.sh` - Main deployment script
+- `internal/admin/config.go` - Runtime configuration
+- `cmd/clotilde/main.go` - Main application code
+
+## ⚠️ COMMON MISTAKES TO AVOID
+
+1. **Deploying without admin dashboard** - Always check ADMIN_USER and ADMIN_SECRET
+2. **Building in cloud** - Always build locally first (saves money)
+3. **Committing secrets** - Always check git diff before committing
+4. **Skipping local tests** - Test locally to catch errors early
+5. **Forgetting to verify admin** - Always check admin returns 401 after deployment
+6. **Using training data for web search** - Always use Perplexity for real-time data
+
+## 🔍 WHEN TO READ DOCUMENTATION
+
+### Always Read Before:
+- Deploying to production
+- Making security-related changes
+- Modifying deployment scripts
+- Changing authentication/authorization
+- Updating secret management
+
+### Reference Files:
+- `docs/agents.md` - Full deployment guide and architecture
+- `docs/SECURITY.md` - Security best practices
+- `docs/QUICKSTART.md` - Quick start guide
+
+## 💡 HELPFUL REMINDERS
+
+### Cost Optimization
+- Local Docker builds: FREE
+- Cloud Build: Costs money
+- Admin dashboard: Saves redeployment costs
+- Always build locally to save money
+
+### User Experience
+- Admin dashboard enables runtime config (better UX)
+- Fast responses (Claude) improve CarPlay experience
+- Real-time data (Perplexity) for web search queries
+- Clear error messages help users troubleshoot
+
+### Security
+- Secrets in Secret Manager, never in code
+- Use placeholders in documentation
+- Check git diff before committing
+- Rotate secrets if accidentally exposed
+
+---
+
+**Last Updated**: 2025-12-23
+**Status**: Active
+**Priority**: These rules MUST be followed for all deployments and code changes
+
