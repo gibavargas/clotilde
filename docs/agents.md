@@ -566,12 +566,18 @@ After implementing this feature, verify:
 
 ---
 
-## ⚙️ Dynamic Runtime Configuration (Admin UI Feature)
+## ⚙️ Dynamic Runtime Configuration (NO REDEPLOYMENT NEEDED!)
+
+### 🚨 IMPORTANT FOR FUTURE DEVELOPERS
+
+**You can change AI models, prompts, and settings WITHOUT redeploying the server!**
+
+This saves significant Cloud Run costs and eliminates downtime. Changes take effect immediately for all new requests.
 
 ### Overview
 
-**Date Implemented**: 2025-11-25  
-**Feature**: Dynamic system prompt and model selection without redeployment  
+**Date Implemented**: 2025-11-25
+**Feature**: Dynamic system prompt and model selection without redeployment
 **Impact**: Saves Cloud Run costs by avoiding redeployment for configuration changes
 
 ### What Was Added
@@ -579,6 +585,31 @@ After implementing this feature, verify:
 The admin UI now supports runtime configuration changes:
 1. **System Prompt**: Editable via admin UI, takes effect immediately
 2. **Model Selection**: Switch between OpenAI models that support the Responses API
+
+### How to Use (Two Methods)
+
+#### Method 1: Admin Dashboard (Web UI)
+- Access: `https://your-service-url.run.app/admin/`
+- Login with HTTP Basic Auth (`ADMIN_USER`/`ADMIN_PASSWORD`)
+- Update models and prompts through the web interface
+
+#### Method 2: API (Programmatic - Recommended for Automation)
+
+```bash
+# Get current configuration
+curl -H "X-API-Key: YOUR_API_KEY" https://your-service-url.run.app/api/config
+
+# Change models (example: fix timeout issues by switching to faster models)
+curl -X POST https://your-service-url.run.app/api/config \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: YOUR_API_KEY" \
+  -d '{
+    "standard_model": "gpt-4.1-mini",
+    "premium_model": "gpt-4.1"
+  }'
+```
+
+**Changes take effect immediately - no redeployment required!**
 
 ### Architecture
 

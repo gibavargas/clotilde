@@ -47,5 +47,20 @@ func init() {
 		"faxina", "arrumação", "minimalismo", "feng shui", "paisagismo", "horta", "pomar",
 		"vestuário", "roupa", "sapato", "acessório", "tendência de moda", "look", "outfit",
 		"cabelo", "pele", "unha", "perfume", "cosmético", "dermocosmético", "rotina de beleza",
+
+		// Food & Drinks (recipes, pairings, suggestions)
+		"comida", "prato", "pratos", "cardápio", "menu", "entrada", "aperitivo", "petisco", "sobremesa",
+		"almoço", "jantar", "café da manhã", "lanche", "brunch",
+		"restaurante", "restaurantes", "bistrô", "bistro", "padaria", "lanchonete", "cafeteria",
+		"bar", "bares", "boteco", "botecos", "pub", "gastropub",
+		"pizza", "pizzaria", "hambúrguer", "hamburgueria", "sanduíche", "taco", "sushi", "temaki",
+		"churrasco", "churrascaria", "rodízio", "massa", "pasta", "risoto", "feijoada", "moqueca",
+		"vegano", "vegetariano", "sem glúten", "sem lactose", "low carb", "fit",
+		"sobremesas", "bolo", "torta", "mousse", "sorvete", "gelato", "pudim", "brigadeiro",
+		"bebida alcoólica", "bebidas alcoólicas", "vinho", "vinhos", "cerveja", "cervejas", "cerveja artesanal",
+		"chope", "chopp", "espumante", "champanhe", "whisky", "rum", "tequila", "gin", "vodca",
+		"drink sem álcool", "mocktail", "refrigerante", "suco", "smoothie", "café", "chá",
+		"harmonização", "harmonizar", "acompanhar", "acompanhamento",
+		"delivery", "entrega", "ifood", "ubereats", "99food",
 	)
 }

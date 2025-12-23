@@ -89,6 +89,23 @@ curl -X POST $SERVICE_URL/chat \
 - Review [SECURITY.md](SECURITY.md) for security best practices
 - Configure monitoring alerts in Google Cloud Console
 
+## ⚡ Pro Tip: Runtime Configuration
+
+**No redeployment needed!** After setup, you can change AI models, prompts, and settings instantly:
+
+```bash
+# Switch to faster models for better performance
+curl -X POST $SERVICE_URL/api/config \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $API_KEY" \
+  -d '{
+    "standard_model": "gpt-4.1-mini",
+    "premium_model": "gpt-4.1"
+  }'
+```
+
+See [Runtime Configuration](#runtime-configuration-no-redeployment-needed) in README.md for full details.
+
 ## Troubleshooting
 
 ### Service won't start

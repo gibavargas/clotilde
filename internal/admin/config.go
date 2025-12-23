@@ -10,12 +10,12 @@ import (
 
 // RuntimeConfig holds runtime configuration that can be changed via admin UI
 type RuntimeConfig struct {
-	BaseSystemPrompt string            `json:"base_system_prompt"` // Core principles (shared by all)
-	CategoryPrompts  map[string]string `json:"category_prompts"`   // category -> prompt override (optional)
-	StandardModel    string            `json:"standard_model"`     // Fast/cheap model (e.g., gpt-4.1-mini)
-	PremiumModel     string            `json:"premium_model"`      // Powerful model (default: gpt-4.1-mini, also supports gpt-4.1, o3)
-	CategoryModels   map[string]string `json:"category_models"`    // category -> model override (optional)
-	PerplexityEnabled bool             `json:"perplexity_enabled"` // Enable Perplexity Search API for web search (default: true)
+	BaseSystemPrompt  string            `json:"base_system_prompt"` // Core principles (shared by all)
+	CategoryPrompts   map[string]string `json:"category_prompts"`   // category -> prompt override (optional)
+	StandardModel     string            `json:"standard_model"`     // Fast/cheap model (e.g., gpt-4.1-mini)
+	PremiumModel      string            `json:"premium_model"`      // Powerful model (default: gpt-4.1-mini, also supports gpt-4.1, o3)
+	CategoryModels    map[string]string `json:"category_models"`    // category -> model override (optional)
+	PerplexityEnabled bool              `json:"perplexity_enabled"` // Enable Perplexity Search API for web search (default: true)
 
 	// Legacy field for backward compatibility
 	SystemPrompt string `json:"system_prompt,omitempty"`
@@ -24,12 +24,12 @@ type RuntimeConfig struct {
 var (
 	configMutex   sync.RWMutex
 	runtimeConfig = RuntimeConfig{
-		BaseSystemPrompt: "", // Will be initialized with default from main.go
-		CategoryPrompts:  nil,
-		CategoryModels:   make(map[string]string),
-		StandardModel:    "gpt-4.1-mini",
-		PremiumModel:     "gpt-4.1-mini", // Default to gpt-4.1-mini
-		PerplexityEnabled: true,           // Default: enabled
+		BaseSystemPrompt:  "", // Will be initialized with default from main.go
+		CategoryPrompts:   nil,
+		CategoryModels:    make(map[string]string),
+		StandardModel:     "claude-haiku-4-5-20251001", // Claude Haiku 4.5 - fastest, ideal for CarPlay
+		PremiumModel:      "claude-haiku-4-5-20251001", // Same fast model for all queries to avoid timeouts
+		PerplexityEnabled: true,                      // Default: enabled
 	}
 	defaultCategoryPrompts = make(map[string]string) // Store default category prompts
 	initialized            = false
@@ -90,11 +90,11 @@ func GetConfig() RuntimeConfig {
 	}
 
 	return RuntimeConfig{
-		BaseSystemPrompt: runtimeConfig.BaseSystemPrompt,
-		CategoryPrompts:  categoryPrompts,
-		CategoryModels:   categoryModels,
-		StandardModel:    runtimeConfig.StandardModel,
-		PremiumModel:     runtimeConfig.PremiumModel,
+		BaseSystemPrompt:  runtimeConfig.BaseSystemPrompt,
+		CategoryPrompts:   categoryPrompts,
+		CategoryModels:    categoryModels,
+		StandardModel:     runtimeConfig.StandardModel,
+		PremiumModel:      runtimeConfig.PremiumModel,
 		PerplexityEnabled: runtimeConfig.PerplexityEnabled,
 		// Legacy support
 		SystemPrompt: runtimeConfig.BaseSystemPrompt,
@@ -142,7 +142,7 @@ func validateSystemPrompt(prompt string) error {
 // SetConfig updates the runtime configuration
 // Returns error if validation fails
 func SetConfig(newConfig RuntimeConfig) error {
-	// All models that support Responses API - can be used in either list
+	// All models that can be used - OpenAI and Claude (Anthropic)
 	validModels := map[string]bool{
 		// GPT-4o series (confirmed working)
 		"gpt-4o":            true,
@@ -169,6 +169,16 @@ func SetConfig(newConfig RuntimeConfig) error {
 		"o3":      true,
 		"o3-mini": true,
 		"o4-mini": true,
+		// Claude models (Anthropic) - FAST, ideal for CarPlay
+		// Claude Haiku 4.5 is extremely fast (~1-3s), best for CarPlay
+		"claude-haiku-4-5-20251001": true, // Latest Haiku 4.5 - fastest, best for CarPlay
+		// Older Claude models (for backward compatibility)
+		"claude-3-5-haiku-20241022":  true,
+		"claude-3-5-haiku-latest":    true,
+		"claude-3-5-sonnet-20241022": true,
+		"claude-3-5-sonnet-latest":   true,
+		"claude-sonnet-4-20250514":   true, // Claude Sonnet 4
+		"claude-3-opus-20240229":     true, // Most capable but slower
 	}
 
 	if !validModels[newConfig.StandardModel] {
@@ -249,7 +259,7 @@ func SetConfig(newConfig RuntimeConfig) error {
 
 	runtimeConfig.StandardModel = newConfig.StandardModel
 	runtimeConfig.PremiumModel = newConfig.PremiumModel
-	
+
 	// Update PerplexityEnabled (always update if provided, default to true on first init)
 	if initialized {
 		runtimeConfig.PerplexityEnabled = newConfig.PerplexityEnabled

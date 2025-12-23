@@ -78,13 +78,13 @@ func TestModelSelection(t *testing.T) {
 	originalCategoryModels := config.CategoryModels
 
 	tests := []struct {
-		name           string
-		question       string
-		expectedCat    Category
-		webSearch      bool
-		standardModel  string
-		premiumModel   string
-		expectedModel  string // Expected model (may be fallback for web search)
+		name          string
+		question      string
+		expectedCat   Category
+		webSearch     bool
+		standardModel string
+		premiumModel  string
+		expectedModel string // Expected model (may be fallback for web search)
 	}{
 		{
 			name:          "Web search uses standard model",
@@ -160,12 +160,12 @@ func TestModelSelection(t *testing.T) {
 			if tt.webSearch {
 				// Model should be standard, premium (if supports web search), or fallback
 				validModels := map[string]bool{
-					tt.standardModel: true,
-					tt.premiumModel:  modelsWithWebSearch[tt.premiumModel],
+					tt.standardModel:       true,
+					tt.premiumModel:        modelsWithWebSearch[tt.premiumModel],
 					webSearchFallbackModel: true,
 				}
 				if !validModels[decision.Model] {
-					t.Errorf("Model %s not in expected set (standard=%s, premium=%s, fallback=%s)", 
+					t.Errorf("Model %s not in expected set (standard=%s, premium=%s, fallback=%s)",
 						decision.Model, tt.standardModel, tt.premiumModel, webSearchFallbackModel)
 				}
 			} else {
@@ -193,8 +193,9 @@ func TestWebSearchFallback(t *testing.T) {
 
 	// Test with a model that doesn't support web search
 	admin.SetConfig(admin.RuntimeConfig{
-		StandardModel: "gpt-4.1-nano", // Doesn't support web search
-		PremiumModel:  "gpt-4.1",
+		BaseSystemPrompt: config.BaseSystemPrompt,
+		StandardModel:    "gpt-4.1-nano", // Doesn't support web search
+		PremiumModel:     "gpt-4.1",
 	})
 
 	decision := Route("Quais as notícias?")
@@ -213,8 +214,9 @@ func TestWebSearchFallback(t *testing.T) {
 
 	// Restore
 	admin.SetConfig(admin.RuntimeConfig{
-		StandardModel: originalStandard,
-		PremiumModel:  config.PremiumModel,
+		BaseSystemPrompt: config.BaseSystemPrompt,
+		StandardModel:    originalStandard,
+		PremiumModel:     config.PremiumModel,
 	})
 }
 
@@ -242,9 +244,9 @@ func TestGPT5ReasoningEffort(t *testing.T) {
 		t.Error("Expected webSearch=true")
 	}
 
-	// GPT-5 requires reasoning for web search
-	if decision.Model == "gpt-5" && decision.ReasoningEffort != "low" {
-		t.Errorf("Expected reasoningEffort='low' for GPT-5, got '%s' (model=%s)", 
+	// GPT-5 requires reasoning "medium" minimum for web search to work
+	if decision.Model == "gpt-5" && decision.ReasoningEffort != "medium" {
+		t.Errorf("Expected reasoningEffort='medium' for GPT-5, got '%s' (model=%s)",
 			decision.ReasoningEffort, decision.Model)
 	}
 
@@ -260,27 +262,27 @@ func TestGPT5ReasoningEffort(t *testing.T) {
 // TestNegativeKeywords tests that negative keywords prevent false positives
 func TestNegativeKeywords(t *testing.T) {
 	tests := []struct {
-		name          string
-		question      string
-		expectedCat   Category
+		name           string
+		question       string
+		expectedCat    Category
 		notExpectedCat Category
 	}{
 		{
-			name:          "Create news should be creative, not web search",
-			question:      "Crie uma notícia sobre aliens",
-			expectedCat:   CategoryCreative,
+			name:           "Create news should be creative, not web search",
+			question:       "Crie uma notícia sobre aliens",
+			expectedCat:    CategoryCreative,
 			notExpectedCat: CategoryWebSearch,
 		},
 		{
-			name:          "Explain news should be complex, not web search",
-			question:      "Explique a notícia sobre política",
-			expectedCat:   CategoryComplex,
+			name:           "Explain news should be complex, not web search",
+			question:       "Explique a notícia sobre política",
+			expectedCat:    CategoryComplex,
 			notExpectedCat: CategoryWebSearch,
 		},
 		{
-			name:          "Define news should be factual, not web search",
-			question:      "O que é uma notícia?",
-			expectedCat:   CategoryFactual,
+			name:           "Define news should be factual, not web search",
+			question:       "O que é uma notícia?",
+			expectedCat:    CategoryFactual,
 			notExpectedCat: CategoryWebSearch,
 		},
 	}
@@ -363,10 +365,10 @@ func TestEdgeCases(t *testing.T) {
 func TestTieBreaking(t *testing.T) {
 	// Create questions that might match multiple categories
 	tests := []struct {
-		name         string
-		question     string
-		expectedCat  Category
-		description  string
+		name        string
+		question    string
+		expectedCat Category
+		description string
 	}{
 		{
 			name:        "Mathematical priority over complex",
@@ -421,7 +423,7 @@ func TestNormalizationEdgeCases(t *testing.T) {
 		{"correr", "corr"},
 		{"", ""},
 		{"   ", ""},
-		{"a", "a"}, // Short word, no stemming
+		{"a", "a"},     // Short word, no stemming
 		{"abc", "abc"}, // Short word, no stemming
 	}
 
@@ -527,4 +529,3 @@ func BenchmarkMatchCategory(b *testing.B) {
 		matchCategory(question, categories[i%len(categories)])
 	}
 }
-

@@ -122,5 +122,11 @@ func init() {
 		"atlético mineiro", "botafogo", "fluminense", "bahia", "vitória", "sport", "náutico", "santa cruz", "fortaleza",
 		"ceará", "real madrid", "barcelona", "manchester city", "manchester united", "liverpool", "chelsea", "arsenal",
 		"juventus", "milan", "inter de milão", "bayern de munique", "borussia dortmund", "psg", "boca juniors", "river plate",
+
+		// Food & Places (often require local search)
+		"restaurante", "restaurantes", "bistrô", "bistro", "padaria", "lanchonete", "cafeteria", "café",
+		"bar", "bares", "boteco", "botecos", "pub", "gastropub", "churrascaria", "rodízio", "pizzaria",
+		"hamburgueria", "food truck", "foodtruck", "delivery de comida", "entrega de comida", "melhor pizza",
+		"melhor hambúrguer", "comida japonesa", "sushi perto", "rodízio de carne", "rodízio de pizza",
 	)
 }

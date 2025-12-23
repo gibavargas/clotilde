@@ -179,18 +179,18 @@ func TestCORSConfiguration(t *testing.T) {
 	}
 }
 
-// TestDefaultModelConfiguration tests that default model is gpt-4.1-mini
+// TestDefaultModelConfiguration tests that default model is gpt-4o-mini (fast) and gpt-4o (premium)
 func TestDefaultModelConfiguration(t *testing.T) {
 	// Initialize config with default prompt (required for GetConfig to work properly)
 	admin.SetDefaultConfig(clotildeBaseSystemPromptTemplate)
 	config := admin.GetConfig()
 
-	if config.StandardModel != "gpt-4.1-mini" {
-		t.Errorf("Expected StandardModel to be 'gpt-4.1-mini', got '%s'", config.StandardModel)
+	if config.StandardModel != "gpt-4o-mini" {
+		t.Errorf("Expected StandardModel to be 'gpt-4o-mini', got '%s'", config.StandardModel)
 	}
 
-	if config.PremiumModel != "gpt-4.1-mini" {
-		t.Errorf("Expected PremiumModel to be 'gpt-4.1-mini', got '%s'", config.PremiumModel)
+	if config.PremiumModel != "gpt-4o" {
+		t.Errorf("Expected PremiumModel to be 'gpt-4o', got '%s'", config.PremiumModel)
 	}
 }
 
@@ -207,12 +207,11 @@ func TestBuildSystemPrompt(t *testing.T) {
 
 	// Check for key instructions in minimal base prompt
 	edgeCaseChecks := []string{
-		"não souber algo com certeza",
-		"Nunca invente fatos",
-		"não pode prever o futuro",
-		"não tem informações sobre isso",
+		"Se não souber, diga",
+		"Não invente",
 		"máximo 2 parágrafos",
 		"português brasileiro",
+		"NUNCA mencione URLs",
 	}
 
 	for _, check := range edgeCaseChecks {
@@ -232,11 +231,10 @@ func TestCategoryPrompts_WebSearch(t *testing.T) {
 	prompt := server.buildSystemPrompt(config, router.CategoryWebSearch, currentTime)
 
 	webSearchChecks := []string{
-		"não retornar resultados ou houver informações conflitantes",
-		"fatos confirmados e especulações",
-		"fontes conflitarem",
-		"informações confirmadas",
-		"notícia falsa",
+		"Use websearch",
+		"fontes com nomes específicos",
+		"Inclua data e hora",
+		"informações conflitantes",
 	}
 
 	for _, check := range webSearchChecks {
@@ -258,9 +256,7 @@ func TestCategoryPrompts_Complex(t *testing.T) {
 	complexChecks := []string{
 		"pensamento crítico",
 		"múltiplas perspectivas",
-		"contraditórias",
 		"conceitos-chave",
-		"declare-as explicitamente",
 	}
 
 	for _, check := range complexChecks {
@@ -280,11 +276,9 @@ func TestCategoryPrompts_Factual(t *testing.T) {
 	prompt := server.buildSystemPrompt(config, router.CategoryFactual, currentTime)
 
 	factualChecks := []string{
-		"Não tenho certeza",
-		"reconheça a incerteza",
-		"pode estar desatualizada",
-		"múltiplas interpretações válidas",
-		"tem confiança",
+		"respostas diretas",
+		"Foque em precisão",
+		"informação pode estar desatualizada",
 	}
 
 	for _, check := range factualChecks {
@@ -304,11 +298,9 @@ func TestCategoryPrompts_Mathematical(t *testing.T) {
 	prompt := server.buildSystemPrompt(config, router.CategoryMathematical, currentTime)
 
 	mathChecks := []string{
-		"Verifique cálculos",
-		"impossível ou indefinido",
-		"aproximação",
-		"números ou operações inválidos",
-		"unidades são incompatíveis",
+		"Mostre o resultado claramente",
+		"divisão por zero",
+		"consistência de unidades",
 	}
 
 	for _, check := range mathChecks {
@@ -328,11 +320,8 @@ func TestCategoryPrompts_Creative(t *testing.T) {
 	prompt := server.buildSystemPrompt(config, router.CategoryCreative, currentTime)
 
 	creativeChecks := []string{
-		"fundamentado na realidade",
-		"práticas e viáveis",
-		"cenários impossíveis",
-		"alternativas realistas",
-		"sugestões criativas e informações factuais",
+		"sugestões diretas e interessantes",
+		"drinks/receitas: dê 2-3 opções breves e atraentes",
 	}
 
 	for _, check := range creativeChecks {
@@ -374,10 +363,8 @@ func TestPromptHallucinationPrevention(t *testing.T) {
 	prompt := server.buildSystemPrompt(config, router.CategorySimple, currentTime)
 
 	hallucinationChecks := []string{
-		"não souber algo com certeza",
-		"Nunca invente fatos",
-		"Nunca invente",
-		"não tem informações sobre isso",
+		"Se não souber, diga",
+		"Não invente",
 	}
 
 	for _, check := range hallucinationChecks {

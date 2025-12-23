@@ -260,8 +260,8 @@ func Route(question string) RouteDecision {
 			model = webSearchFallbackModel
 			reasoningEffort = ""
 		} else if isGPT5 {
-			reasoningEffort = "low"
-			log.Printf("gpt-5 with web search: using reasoning='low' (minimum required)")
+			reasoningEffort = "medium"
+			log.Printf("gpt-5 with web search: using reasoning='medium' (minimum required)")
 		}
 	}
 

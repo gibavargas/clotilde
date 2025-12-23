@@ -143,6 +143,8 @@ gcloud run services describe clotilde --region $REGION --format="value(status.ur
 
 Save this URL - you'll need it for the Apple Shortcut.
 
+**🎯 Pro Tip**: After deployment, you can change models and settings **WITHOUT redeploying**! See the [Runtime Configuration](#runtime-configuration-no-redeployment-needed) section below for details.
+
 ### 4. Environment Variables
 
 For local development, create a `.env` file from the template:
@@ -473,15 +475,56 @@ The admin dashboard provides a web-based interface for monitoring your Clotilde 
 | `POST /admin/config` | Update runtime configuration without redeployment | HTTP Basic Auth |
 | `GET /health` | Enhanced health check with uptime, request count, and memory usage | None |
 
-### Runtime Configuration
+### Runtime Configuration (No Redeployment Needed!)
 
-The admin dashboard allows you to change configuration without redeploying:
+⚡ **Important**: You can change models, prompts, and settings **WITHOUT redeploying** the server! Changes take effect immediately for all new requests.
 
-- **System Prompt**: Edit the AI's personality and behavior instructions
-- **Standard Model**: Select the model for simple queries (e.g., `gpt-4.1-mini`, `gpt-4o-mini`)
-- **Premium Model**: Select the model for complex queries (default: `gpt-4.1-mini`, also supports `gpt-4.1`, `o3`)
+#### Two Ways to Update Configuration:
 
-Changes take effect immediately for all new requests.
+**1. Via API (Programmatic/Programmer-Friendly)**
+```bash
+# Get current config
+curl -H "X-API-Key: YOUR_API_KEY" https://your-service-url.run.app/api/config
+
+# Update models (example: switch to faster models for better performance)
+curl -X POST https://your-service-url.run.app/api/config \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: YOUR_API_KEY" \
+  -d '{
+    "standard_model": "gpt-4.1-mini",
+    "premium_model": "gpt-4.1"
+  }'
+```
+
+**2. Via Admin Dashboard (Web UI)**
+- Access: `https://your-service-url.run.app/admin/`
+- Login with HTTP Basic Auth (ADMIN_USER/ADMIN_PASSWORD)
+- Update models, prompts, and settings through the web interface
+
+#### What You Can Change Without Redeployment:
+
+- **Standard Model**: Model for simple queries (e.g., `gpt-4.1-mini`, `gpt-4o-mini`, `gpt-4o`)
+- **Premium Model**: Model for complex queries (e.g., `gpt-4.1`, `gpt-4o`, `o3`)
+- **System Prompts**: AI personality and behavior instructions
+- **Category Models**: Override models for specific query types (web search, creative, etc.)
+- **Perplexity Integration**: Enable/disable web search via Perplexity API
+
+#### Example: Fix Timeout Issues by Switching to Faster Models
+
+If users experience timeouts, switch to faster models:
+
+```bash
+# Switch from slow gpt-5.1 to fast gpt-4.1-mini
+curl -X POST https://your-service-url.run.app/api/config \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: YOUR_API_KEY" \
+  -d '{
+    "standard_model": "gpt-4.1-mini",
+    "premium_model": "gpt-4o"
+  }'
+```
+
+**Changes take effect immediately** - no downtime, no redeployment required!
 
 ### Security
 

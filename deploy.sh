@@ -7,6 +7,7 @@
 #   API_SECRET    - Name of your service API key secret in Secret Manager
 #
 # Optional environment variables:
+#   CLAUDE_SECRET        - Name of Claude (Anthropic) API key secret in Secret Manager (RECOMMENDED for fast responses)
 #   ADMIN_USER           - Admin username for dashboard (enables admin dashboard)
 #   ADMIN_SECRET         - Name of admin password secret in Secret Manager (enables admin dashboard)
 #   PERPLEXITY_SECRET_NAME - Name of Perplexity API key secret in Secret Manager (enables Perplexity Search API)
@@ -68,6 +69,9 @@ fi
 if [ -n "$PERPLEXITY_SECRET_NAME" ]; then
     SECRETS="${SECRETS},PERPLEXITY_SECRET_NAME=${PERPLEXITY_SECRET_NAME}:latest"
 fi
+if [ -n "$CLAUDE_SECRET" ]; then
+    SECRETS="${SECRETS},CLAUDE_KEY_SECRET_NAME=${CLAUDE_SECRET}:latest"
+fi
 
 echo "Building and deploying Clotilde..."
 echo "Project ID: $PROJECT_ID"
@@ -81,6 +85,9 @@ if [ -n "$ADMIN_USER" ]; then
 fi
 if [ -n "$PERPLEXITY_SECRET_NAME" ]; then
     echo "Perplexity Secret: $PERPLEXITY_SECRET_NAME"
+fi
+if [ -n "$CLAUDE_SECRET" ]; then
+    echo "Claude Secret: $CLAUDE_SECRET (RECOMMENDED for fast CarPlay responses)"
 fi
 echo "Log Buffer Size: $LOG_BUFFER_SIZE"
 echo ""
