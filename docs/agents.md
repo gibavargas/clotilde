@@ -2197,3 +2197,285 @@ export OPENAI_SECRET="clotilde-oai-e2665d43"
 **Status**: Implemented ✅  
 **Critical**: This must be followed for all future commits
 
+---
+
+## 🚨 CRITICAL DEPLOYMENT PREFERENCES (MUST ALWAYS FOLLOW)
+
+### Overview
+
+**Date Added**: 2025-12-23  
+**Severity**: 🔴 Critical  
+**Purpose**: Ensure consistent deployment practices and cost optimization
+
+### 1. Admin Dashboard MUST Always Be Enabled
+
+**CRITICAL RULE**: **NEVER deploy without the admin dashboard enabled.**
+
+**Why**:
+- Admin dashboard provides runtime configuration management (no redeployment needed)
+- Enables monitoring via logs and stats
+- Allows model/prompt changes without redeployment (saves Cloud Run costs)
+- Provides UI for troubleshooting
+
+**Required Environment Variables**:
+- `ADMIN_USER` - Admin username (e.g., "admin")
+- `ADMIN_SECRET` - Name of Secret Manager secret containing admin password
+
+**Deployment Command**:
+```bash
+# ALWAYS include admin dashboard
+export OPENAI_SECRET=<your-openai-secret-name>
+export API_SECRET=<your-api-secret-name>
+export ADMIN_USER=admin
+export ADMIN_SECRET=<your-admin-password-secret-name>
+export CLAUDE_SECRET=<your-claude-secret-name>  # If using Claude
+./deploy.sh
+```
+
+**Verification After Deployment**:
+```bash
+# Should return HTTP 401 (Unauthorized - admin is enabled)
+curl -I https://<service-url>/admin/
+# Expected: HTTP/2 401
+# If you see 503, admin is NOT configured - FIX IT!
+```
+
+**What Happens If Not Configured**:
+- Admin routes return HTTP 503 (Service Unavailable) with helpful error page
+- No runtime configuration management
+- All changes require redeployment (costs money)
+- No monitoring dashboard
+
+**For AI Agents**: 
+- ✅ **ALWAYS** check if `ADMIN_USER` and `ADMIN_SECRET` are set before deploying
+- ✅ **ALWAYS** include admin dashboard in deployment commands
+- ✅ **ALWAYS** verify admin is enabled after deployment (should return 401, not 503)
+- ❌ **NEVER** deploy without admin dashboard unless explicitly requested by user
+
+---
+
+### 2. Build and Test Locally Before Deploying
+
+**CRITICAL RULE**: **ALWAYS build and test Docker container locally before deploying to Google Cloud Run.**
+
+**Why**:
+- **Cost Savings**: Building on Google Cloud Build costs money. Building locally is FREE.
+- **Faster Iteration**: Local builds are faster than cloud builds
+- **Catch Errors Early**: Find build issues before deploying
+- **Test Before Deploy**: Verify container works before pushing to cloud
+
+**Required Steps**:
+
+#### Step 1: Build Docker Image Locally
+```bash
+# Build the image locally (FREE - no Google Cloud costs)
+docker build -t clotilde-local:test .
+
+# Verify image was created
+docker images | grep clotilde-local
+```
+
+#### Step 2: Test Container Locally (Optional but Recommended)
+```bash
+# Run container locally to test
+docker run -d \
+  --name clotilde-test \
+  -p 8080:8080 \
+  -e OPENAI_KEY_SECRET_NAME="test-key" \
+  -e API_KEY_SECRET_NAME="test-key" \
+  -e CLAUDE_KEY_SECRET_NAME="test-key" \
+  -e ADMIN_USER="admin" \
+  -e ADMIN_PASSWORD="test" \
+  clotilde-local:test
+
+# Test health endpoint
+curl http://localhost:8080/health
+
+# Test admin endpoint (should return 401)
+curl -I http://localhost:8080/admin/
+
+# Stop and remove test container
+docker stop clotilde-test
+docker rm clotilde-test
+```
+
+#### Step 3: Tag for Cloud Registry
+```bash
+# Tag the local image for Artifact Registry
+IMAGE_NAME="us-central1-docker.pkg.dev/${PROJECT_ID}/clotilde-repo/clotilde:latest"
+docker tag clotilde-local:test $IMAGE_NAME
+```
+
+#### Step 4: Push and Deploy
+```bash
+# Push pre-built image (faster than building in cloud)
+docker push $IMAGE_NAME
+
+# Deploy using pre-built image
+gcloud run deploy clotilde \
+  --image $IMAGE_NAME \
+  --region us-central1 \
+  --platform managed \
+  --allow-unauthenticated \
+  --memory 256Mi \
+  --cpu 1 \
+  --min-instances 0 \
+  --max-instances 10 \
+  --timeout 30 \
+  --set-env-vars "$ENV_VARS" \
+  --set-secrets "$SECRETS"
+```
+
+**Alternative: Use deploy.sh with Local Build**
+
+The `deploy.sh` script can be modified to build locally first, or you can build manually:
+
+```bash
+# Build locally first
+docker build -t $IMAGE_NAME .
+
+# Then run deploy.sh (it will skip build if image exists, or modify script)
+# OR push manually and deploy
+docker push $IMAGE_NAME
+gcloud run deploy ... --image $IMAGE_NAME
+```
+
+**Cost Comparison**:
+- **Local Build**: $0 (uses your machine's resources)
+- **Cloud Build**: ~$0.003 per build minute (adds up over time)
+- **Savings**: 100% of build costs when building locally
+
+**For AI Agents**:
+- ✅ **ALWAYS** build Docker image locally first
+- ✅ **ALWAYS** test container locally if possible
+- ✅ **ALWAYS** push pre-built image instead of building in cloud
+- ✅ **ALWAYS** mention cost savings when building locally
+- ❌ **NEVER** use `gcloud builds submit` (builds in cloud, costs money)
+- ❌ **NEVER** skip local build step unless user explicitly requests cloud build
+
+---
+
+### 3. Deployment Checklist (Always Follow)
+
+**Before Every Deployment**:
+
+- [ ] **Admin Dashboard**: Verify `ADMIN_USER` and `ADMIN_SECRET` are set
+- [ ] **Local Build**: Build Docker image locally first
+- [ ] **Local Test**: Test container locally (optional but recommended)
+- [ ] **Secrets**: Verify all required secrets exist in Secret Manager
+- [ ] **Code**: Verify code compiles: `go build ./cmd/clotilde`
+- [ ] **Tests**: Run tests: `go test ./...` (if applicable)
+
+**During Deployment**:
+
+- [ ] **Build Locally**: `docker build -t $IMAGE_NAME .`
+- [ ] **Test Locally**: `docker run ...` (optional)
+- [ ] **Push Image**: `docker push $IMAGE_NAME`
+- [ ] **Deploy**: Use `gcloud run deploy` or `deploy.sh`
+
+**After Deployment**:
+
+- [ ] **Health Check**: `curl https://<service-url>/health`
+- [ ] **Admin Check**: `curl -I https://<service-url>/admin/` (should return 401, not 503)
+- [ ] **Logs**: Check Cloud Run logs for errors
+- [ ] **Secrets**: Verify secrets are mounted correctly
+
+---
+
+### 4. Updated deploy.sh Best Practices
+
+**Recommended Enhancement** (for future updates):
+
+The `deploy.sh` script should:
+1. Check if Docker image exists locally
+2. If not, build locally (not in cloud)
+3. Test container locally (optional flag)
+4. Push pre-built image
+5. Deploy to Cloud Run
+
+**Current Workflow** (acceptable but can be improved):
+- `deploy.sh` builds in Docker (local or cloud)
+- Pushes to Artifact Registry
+- Deploys to Cloud Run
+
+**Future Enhancement**:
+```bash
+# Add flag to build locally first
+./deploy.sh --build-local
+
+# Add flag to test locally before deploying
+./deploy.sh --test-local
+```
+
+---
+
+### 5. Cost Optimization Summary
+
+**Always Build Locally**:
+- ✅ Saves 100% of Cloud Build costs
+- ✅ Faster iteration (no network latency)
+- ✅ Catch errors before deploying
+- ✅ Test before pushing to cloud
+
+**Always Enable Admin Dashboard**:
+- ✅ Runtime configuration changes (no redeployment)
+- ✅ Saves Cloud Run redeployment costs
+- ✅ Enables monitoring and troubleshooting
+- ✅ Better user experience
+
+---
+
+### For AI Agents: Critical Rules
+
+**When Deploying**:
+
+1. ✅ **ALWAYS** check for `ADMIN_USER` and `ADMIN_SECRET` before deploying
+2. ✅ **ALWAYS** build Docker image locally first
+3. ✅ **ALWAYS** test container locally if possible
+4. ✅ **ALWAYS** push pre-built image (don't build in cloud)
+5. ✅ **ALWAYS** verify admin dashboard is enabled after deployment (401, not 503)
+6. ✅ **ALWAYS** mention cost savings when building locally
+
+**When User Says "Deploy"**:
+
+1. First: Check if admin credentials are set
+2. Second: Build Docker image locally
+3. Third: Test container locally (optional)
+4. Fourth: Push image to Artifact Registry
+5. Fifth: Deploy to Cloud Run
+6. Sixth: Verify admin dashboard is enabled
+
+**Example Response**:
+```bash
+# Step 1: Verify admin credentials
+if [ -z "$ADMIN_USER" ] || [ -z "$ADMIN_SECRET" ]; then
+  echo "⚠️  WARNING: Admin dashboard not configured"
+  echo "Setting up admin dashboard..."
+  # Help user set up admin
+fi
+
+# Step 2: Build locally (FREE)
+echo "Building Docker image locally (saves Cloud Build costs)..."
+docker build -t $IMAGE_NAME .
+
+# Step 3: Test locally (optional)
+echo "Testing container locally..."
+docker run -d --name test $IMAGE_NAME
+curl http://localhost:8080/health
+docker stop test && docker rm test
+
+# Step 4: Push and deploy
+docker push $IMAGE_NAME
+./deploy.sh
+
+# Step 5: Verify admin
+curl -I https://<service-url>/admin/
+# Should return 401, not 503
+```
+
+---
+
+**Last Updated**: 2025-12-23  
+**Status**: Active ✅  
+**Critical**: These preferences MUST be followed for all deployments
+
