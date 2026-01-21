@@ -56,7 +56,7 @@ func TestScoringAccuracy(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			decision := Route(tt.question)
-			score := matchCategory(tt.question, tt.expectedCat) * categoryWeights[tt.expectedCat]
+			score := matchCategory(Normalize(tt.question), tt.expectedCat) * categoryWeights[tt.expectedCat]
 
 			if score < tt.expectedMin || score > tt.expectedMax {
 				t.Logf("Score %.2f for category %s (expected %.2f-%.2f)", score, tt.expectedCat, tt.expectedMin, tt.expectedMax)
@@ -391,12 +391,13 @@ func TestTieBreaking(t *testing.T) {
 			if decision.Category != tt.expectedCat {
 				t.Logf("%s: Expected %s, got %s", tt.description, tt.expectedCat, decision.Category)
 				// Log scores for debugging
+				normalized := Normalize(tt.question)
 				scores := map[Category]float64{
-					CategoryWebSearch:    matchCategory(tt.question, CategoryWebSearch) * categoryWeights[CategoryWebSearch],
-					CategoryComplex:      matchCategory(tt.question, CategoryComplex) * categoryWeights[CategoryComplex],
-					CategoryFactual:      matchCategory(tt.question, CategoryFactual) * categoryWeights[CategoryFactual],
-					CategoryMathematical: matchCategory(tt.question, CategoryMathematical) * categoryWeights[CategoryMathematical],
-					CategoryCreative:     matchCategory(tt.question, CategoryCreative) * categoryWeights[CategoryCreative],
+					CategoryWebSearch:    matchCategory(normalized, CategoryWebSearch) * categoryWeights[CategoryWebSearch],
+					CategoryComplex:      matchCategory(normalized, CategoryComplex) * categoryWeights[CategoryComplex],
+					CategoryFactual:      matchCategory(normalized, CategoryFactual) * categoryWeights[CategoryFactual],
+					CategoryMathematical: matchCategory(normalized, CategoryMathematical) * categoryWeights[CategoryMathematical],
+					CategoryCreative:     matchCategory(normalized, CategoryCreative) * categoryWeights[CategoryCreative],
 				}
 				for cat, score := range scores {
 					t.Logf("  %s: %.2f", cat, score)
@@ -515,7 +516,7 @@ func BenchmarkNormalize(b *testing.B) {
 
 // BenchmarkMatchCategory benchmarks category matching
 func BenchmarkMatchCategory(b *testing.B) {
-	question := "Quais as últimas notícias do Brasil hoje?"
+	question := Normalize("Quais as últimas notícias do Brasil hoje?")
 	categories := []Category{
 		CategoryWebSearch,
 		CategoryComplex,

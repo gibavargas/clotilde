@@ -131,9 +131,7 @@ func init() {
 }
 
 // matchCategory scores a question against a category's keywords using pre-compiled regexes
-func matchCategory(question string, cat Category) float64 {
-	// Normalize question (stemming, accent removal)
-	questionNormalized := Normalize(question)
+func matchCategory(questionNormalized string, cat Category) float64 {
 	score := 0.0
 
 	matcher := matchers[cat]
@@ -172,13 +170,16 @@ func Route(question string) RouteDecision {
 	standardModel := config.StandardModel
 	premiumModel := config.PremiumModel
 
+	// Normalize question (stemming, accent removal)
+	questionNormalized := Normalize(question)
+
 	// Score each category
 	scores := map[Category]float64{
-		CategoryWebSearch:    matchCategory(question, CategoryWebSearch) * categoryWeights[CategoryWebSearch],
-		CategoryComplex:      matchCategory(question, CategoryComplex) * categoryWeights[CategoryComplex],
-		CategoryFactual:      matchCategory(question, CategoryFactual) * categoryWeights[CategoryFactual],
-		CategoryMathematical: matchCategory(question, CategoryMathematical) * categoryWeights[CategoryMathematical],
-		CategoryCreative:     matchCategory(question, CategoryCreative) * categoryWeights[CategoryCreative],
+		CategoryWebSearch:    matchCategory(questionNormalized, CategoryWebSearch) * categoryWeights[CategoryWebSearch],
+		CategoryComplex:      matchCategory(questionNormalized, CategoryComplex) * categoryWeights[CategoryComplex],
+		CategoryFactual:      matchCategory(questionNormalized, CategoryFactual) * categoryWeights[CategoryFactual],
+		CategoryMathematical: matchCategory(questionNormalized, CategoryMathematical) * categoryWeights[CategoryMathematical],
+		CategoryCreative:     matchCategory(questionNormalized, CategoryCreative) * categoryWeights[CategoryCreative],
 	}
 
 	// Find highest scoring category with deterministic tie-breaking
