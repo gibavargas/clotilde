@@ -666,24 +666,29 @@ func (s *Server) logRequest(requestID string, r *http.Request, input, output, mo
 	s.logger.Add(entry)
 }
 
+var (
+	// Compile regular expressions once at package level
+	markdownLinkInParensRegexp = regexp.MustCompile(`\(\[[^\]]+\]\([^\)]+\)\)`)
+	markdownLinkRegexp         = regexp.MustCompile(`\[[^\]]+\]\([^\)]+\)`)
+	urlRegexp                  = regexp.MustCompile(`(?i)(https?://|www\.)[^\s]+`)
+	domainRegexp               = regexp.MustCompile(`(?i)\b[a-z0-9]+([.-][a-z0-9]+)*\.(com|br|org|net|gov|edu|io|co|info|me|tv|xyz)[^\s]*`)
+	spaceRegexp                = regexp.MustCompile(`\s+`)
+)
+
 // removeURLsFromText removes any URLs, web addresses, or domain names from text
 // This is a safety net to ensure no URLs make it to the voice interface
 func removeURLsFromText(text string) string {
 	// Remove markdown links: [text](url) or ([text](url))
 	// First, remove markdown links wrapped in parentheses: ([text](url))
-	markdownLinkInParens := regexp.MustCompile(`\(\[[^\]]+\]\([^\)]+\)\)`)
-	text = markdownLinkInParens.ReplaceAllString(text, "")
+	text = markdownLinkInParensRegexp.ReplaceAllString(text, "")
 	// Then remove standard markdown links: [text](url)
-	markdownLinkPattern := regexp.MustCompile(`\[[^\]]+\]\([^\)]+\)`)
-	text = markdownLinkPattern.ReplaceAllString(text, "")
+	text = markdownLinkRegexp.ReplaceAllString(text, "")
 
 	// Remove URLs (http://, https://, www.)
-	urlPattern := regexp.MustCompile(`(?i)(https?://|www\.)[^\s]+`)
-	text = urlPattern.ReplaceAllString(text, "")
+	text = urlRegexp.ReplaceAllString(text, "")
 
 	// Remove domain patterns like "example.com" or "g1.com.br"
-	domainPattern := regexp.MustCompile(`(?i)\b[a-z0-9]+([.-][a-z0-9]+)*\.(com|br|org|net|gov|edu|io|co|info|me|tv|xyz)[^\s]*`)
-	text = domainPattern.ReplaceAllString(text, "")
+	text = domainRegexp.ReplaceAllString(text, "")
 
 	// Remove phrases that might lead to URLs
 	text = strings.ReplaceAll(text, "você pode ver em", "")
@@ -694,8 +699,7 @@ func removeURLsFromText(text string) string {
 	// Clean up extra spaces and empty parentheses
 	text = strings.ReplaceAll(text, "()", "")
 	text = strings.ReplaceAll(text, "( )", "")
-	spacePattern := regexp.MustCompile(`\s+`)
-	text = spacePattern.ReplaceAllString(text, " ")
+	text = spaceRegexp.ReplaceAllString(text, " ")
 
 	return strings.TrimSpace(text)
 }
