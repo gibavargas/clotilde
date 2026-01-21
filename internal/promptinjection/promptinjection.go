@@ -37,6 +37,29 @@ var suspiciousKeywords = []string{
 	"base prompt", "initial prompt", "ignore all", "forget all",
 }
 
+// Pre-compiled regex patterns for sanitization
+var (
+	reWhitespace = regexp.MustCompile(`\s+`)
+	reTag        = regexp.MustCompile(`(?i)<\|.*?\|>`)
+	reInst       = regexp.MustCompile(`(?i)\[INST\].*?\[/INST\]`)
+	reHeader     = regexp.MustCompile(`(?i)###\s*(Instruction|System|User)`)
+
+	neutralizePatternsList = []struct {
+		pattern     *regexp.Regexp
+		replacement string
+	}{
+		{regexp.MustCompile(`(?i)ignore\s+(all\s+)?(previous|prior|above|earlier)\s+(instruction|prompt|directive|rule|guideline|system)`), ""},
+		{regexp.MustCompile(`(?i)disregard\s+(everything|all|all\s+above)`), ""},
+		{regexp.MustCompile(`(?i)(show|display|output|print|reveal|tell|give)\s+(me\s+)?(your|the)\s+(system|base|initial|original)\s+(prompt|instruction|directive|rule)`), ""},
+		{regexp.MustCompile(`(?i)(what|what\s+are)\s+(your|the)\s+(instruction|prompt|directive|rule|guideline|system\s+prompt)`), ""},
+		{regexp.MustCompile(`(?i)(repeat|echo|copy)\s+(your|the)\s+(instruction|prompt|directive|system\s+prompt)`), ""},
+		{regexp.MustCompile(`(?i)(you\s+are|act\s+as|pretend|roleplay|simulate).*?(developer|admin|root|system|assistant|ai|gpt)`), ""},
+		{regexp.MustCompile(`(?i)(new\s+instruction|new\s+prompt|new\s+directive|new\s+rule)`), ""},
+		{regexp.MustCompile(`(?i)(base64|hex|decode|encode).*?(instruction|prompt|system)`), ""},
+		{regexp.MustCompile(`(?i)jailbreak`), ""},
+	}
+)
+
 // SanitizeInput detects and neutralizes prompt injection attempts in user input
 // Returns the sanitized input and a boolean indicating if injection was detected
 func SanitizeInput(input string) (sanitized string, detected bool) {
@@ -49,7 +72,7 @@ func SanitizeInput(input string) (sanitized string, detected bool) {
 
 	// Normalize input for detection (lowercase, remove extra spaces)
 	normalized := strings.ToLower(strings.TrimSpace(input))
-	normalized = regexp.MustCompile(`\s+`).ReplaceAllString(normalized, " ")
+	normalized = reWhitespace.ReplaceAllString(normalized, " ")
 
 	// Check against injection patterns
 	for _, pattern := range injectionPatterns {
@@ -80,27 +103,12 @@ func SanitizeInput(input string) (sanitized string, detected bool) {
 		sanitized = originalInput
 		
 		// Remove common injection markers
-		sanitized = regexp.MustCompile(`(?i)<\|.*?\|>`).ReplaceAllString(sanitized, "")
-		sanitized = regexp.MustCompile(`(?i)\[INST\].*?\[/INST\]`).ReplaceAllString(sanitized, "")
-		sanitized = regexp.MustCompile(`(?i)###\s*(Instruction|System|User)`).ReplaceAllString(sanitized, "")
+		sanitized = reTag.ReplaceAllString(sanitized, "")
+		sanitized = reInst.ReplaceAllString(sanitized, "")
+		sanitized = reHeader.ReplaceAllString(sanitized, "")
 		
 		// Neutralize common injection phrases by removing or replacing them
-		neutralizePatterns := []struct {
-			pattern     *regexp.Regexp
-			replacement string
-		}{
-			{regexp.MustCompile(`(?i)ignore\s+(all\s+)?(previous|prior|above|earlier)\s+(instruction|prompt|directive|rule|guideline|system)`), ""},
-			{regexp.MustCompile(`(?i)disregard\s+(everything|all|all\s+above)`), ""},
-			{regexp.MustCompile(`(?i)(show|display|output|print|reveal|tell|give)\s+(me\s+)?(your|the)\s+(system|base|initial|original)\s+(prompt|instruction|directive|rule)`), ""},
-			{regexp.MustCompile(`(?i)(what|what\s+are)\s+(your|the)\s+(instruction|prompt|directive|rule|guideline|system\s+prompt)`), ""},
-			{regexp.MustCompile(`(?i)(repeat|echo|copy)\s+(your|the)\s+(instruction|prompt|directive|system\s+prompt)`), ""},
-			{regexp.MustCompile(`(?i)(you\s+are|act\s+as|pretend|roleplay|simulate).*?(developer|admin|root|system|assistant|ai|gpt)`), ""},
-			{regexp.MustCompile(`(?i)(new\s+instruction|new\s+prompt|new\s+directive|new\s+rule)`), ""},
-			{regexp.MustCompile(`(?i)(base64|hex|decode|encode).*?(instruction|prompt|system)`), ""},
-			{regexp.MustCompile(`(?i)jailbreak`), ""},
-		}
-		
-		for _, np := range neutralizePatterns {
+		for _, np := range neutralizePatternsList {
 			sanitized = np.pattern.ReplaceAllString(sanitized, np.replacement)
 		}
 		
@@ -109,7 +117,7 @@ func SanitizeInput(input string) (sanitized string, detected bool) {
 		sanitized = strings.ReplaceAll(sanitized, "\n---\n", "\n")
 		
 		// Clean up extra whitespace
-		sanitized = regexp.MustCompile(`\s+`).ReplaceAllString(sanitized, " ")
+		sanitized = reWhitespace.ReplaceAllString(sanitized, " ")
 		sanitized = strings.TrimSpace(sanitized)
 		
 		// If after sanitization the input is too short or empty, return a safe default
