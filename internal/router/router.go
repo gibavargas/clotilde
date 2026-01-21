@@ -252,10 +252,16 @@ func Route(question string) RouteDecision {
 
 	// If web search is needed, ensure the model supports it
 	if webSearch {
+		isClaude := strings.HasPrefix(model, "claude-")
 		supportsWebSearch := modelsWithWebSearch[model]
 		isGPT5 := strings.HasPrefix(model, "gpt-5")
 
-		if !supportsWebSearch {
+		// Claude models support web search via Perplexity integration (handled in main.go)
+		// Only allow if Perplexity is enabled in config
+		if isClaude && config.PerplexityEnabled {
+			// Claude + Perplexity is supported, no fallback needed
+			// Reasoning effort not applicable to Claude
+		} else if !supportsWebSearch {
 			log.Printf("Model %s does not support web search, using fallback: %s", model, webSearchFallbackModel)
 			model = webSearchFallbackModel
 			reasoningEffort = ""
