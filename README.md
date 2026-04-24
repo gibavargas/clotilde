@@ -35,80 +35,71 @@ A voice-activated CarPlay assistant powered by GPT-5 with web search capabilitie
 
 ## Setup
 
-### 1. Google Cloud Setup
+### 1. Guided Setup Wizard
 
-#### Create Artifact Registry Repository
-
-```bash
-# Set your project ID
-export PROJECT_ID=your-project-id
-export REGION=us-central1
-export REPO_NAME=clotilde-repo
-
-# Create Artifact Registry repository
-gcloud artifacts repositories create $REPO_NAME \
-    --repository-format=docker \
-    --location=$REGION \
-    --description="Clotilde Docker images"
-```
-
-#### Create Secret Manager Secrets
-
-**Important**: Use unique, unpredictable secret names for security.
+The recommended setup path is the Go-based wizard. It checks local prerequisites, creates or updates Google Cloud resources, deploys to Cloud Run, verifies the service, and writes a sanitized summary to `.clotilde/setup-result.json`.
 
 ```bash
-# Generate unique secret names (recommended for security)
-export OPENAI_SECRET="my-openai-key-$(openssl rand -hex 4)"
-export API_SECRET="my-api-key-$(openssl rand -hex 4)"
-
-# Create OpenAI API key secret
-echo -n "your-openai-api-key" | gcloud secrets create $OPENAI_SECRET \
-    --data-file=- \
-    --replication-policy="automatic"
-
-# Create API key for authenticating requests
-echo -n "your-secure-api-key-here" | gcloud secrets create $API_SECRET \
-    --data-file=- \
-    --replication-policy="automatic"
-
-# Create Perplexity API key secret (optional - for web search)
-export PERPLEXITY_SECRET="my-perplexity-key-$(openssl rand -hex 4)"
-echo -n "your-perplexity-api-key" | gcloud secrets create $PERPLEXITY_SECRET \
-    --data-file=- \
-    --replication-policy="automatic"
-
-# Save your secret names securely (you'll need them for deployment)
-echo "OPENAI_SECRET=$OPENAI_SECRET"
-echo "API_SECRET=$API_SECRET"
-echo "PERPLEXITY_SECRET=$PERPLEXITY_SECRET"
+go run ./cmd/clotilde-setup
 ```
 
-#### Grant Cloud Run Service Account Access
+For OpenClaw-style agents and other automation, use non-interactive JSON mode:
 
 ```bash
-# Get the Cloud Run service account email
-export SERVICE_ACCOUNT=$(gcloud iam service-accounts list --filter="displayName:Compute Engine default service account" --format="value(email)")
-
-# Grant Secret Manager access (use your secret names from above)
-gcloud secrets add-iam-policy-binding $OPENAI_SECRET \
-    --member="serviceAccount:${SERVICE_ACCOUNT}" \
-    --role="roles/secretmanager.secretAccessor"
-
-gcloud secrets add-iam-policy-binding $API_SECRET \
-    --member="serviceAccount:${SERVICE_ACCOUNT}" \
-    --role="roles/secretmanager.secretAccessor"
-
-# Grant Secret Manager access for Perplexity API key (if created)
-if [ ! -z "$PERPLEXITY_SECRET" ]; then
-    gcloud secrets add-iam-policy-binding $PERPLEXITY_SECRET \
-        --member="serviceAccount:${SERVICE_ACCOUNT}" \
-        --role="roles/secretmanager.secretAccessor"
-fi
+go run ./cmd/clotilde-setup \
+  --non-interactive \
+  --config setup.json \
+  --output json \
+  --yes
 ```
 
-### 2. Build and Deploy
+Dry-run mode prints the exact planned command sequence without changing Google Cloud resources:
 
-#### Option A: Using deploy.sh (Recommended)
+```bash
+go run ./cmd/clotilde-setup \
+  --non-interactive \
+  --config cmd/clotilde-setup/testdata/minimal.json \
+  --output json \
+  --yes \
+  --dry-run
+```
+
+Minimal `setup.json` shape:
+
+```json
+{
+  "project_id": "your-project-id",
+  "region": "us-central1",
+  "service_name": "clotilde",
+  "repo_name": "clotilde-repo",
+  "openai": {
+    "secret_name": "clotilde-oai-example",
+    "value_env": "OPENAI_API_KEY"
+  },
+  "api": {
+    "secret_name": "clotilde-auth-example",
+    "generate": true
+  },
+  "admin": {
+    "enabled": true,
+    "username": "admin",
+    "password": {
+      "secret_name": "clotilde-admin-example",
+      "value_env": "CLOTILDE_ADMIN_PASSWORD"
+    }
+  }
+}
+```
+
+Secret values are never printed. If the wizard generates the service API key, retrieve it for the Apple Shortcut with:
+
+```bash
+gcloud secrets versions access latest --secret=<your-api-secret-name>
+```
+
+### 2. Manual / Advanced Deployment
+
+The older scripts remain supported if you prefer to provision and deploy manually.
 
 ```bash
 # Set required environment variables
@@ -125,7 +116,9 @@ chmod +x deploy.sh
 ./deploy.sh
 ```
 
-#### Option B: Using Cloud Build (Deprecated)
+`OPENAI_SECRET` and `API_SECRET` are Secret Manager secret names used by deployment scripts. Inside Cloud Run, `OPENAI_KEY_SECRET_NAME` and `API_KEY_SECRET_NAME` are mounted secret values consumed by the Go service.
+
+#### Cloud Build (Deprecated)
 
 > **Note**: Cloud Build is deprecated in favor of the local `deploy.sh` script. This option is kept for reference but is not recommended for new deployments.
 
@@ -588,4 +581,3 @@ See [docs/SECURITY.md](docs/SECURITY.md) for detailed security documentation.
 ## License
 
 MIT License - See [LICENSE](LICENSE) file for details
-
