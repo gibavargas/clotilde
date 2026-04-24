@@ -1,0 +1,22 @@
+{
+  "project_id": "test-project",
+  "region": "us-central1",
+  "service_name": "clotilde",
+  "repo_name": "clotilde-repo",
+  "openai": {
+    "secret_name": "clotilde-oai-test",
+    "use_existing_secret": true
+  },
+  "api": {
+    "secret_name": "clotilde-auth-test",
+    "generate": true
+  },
+  "admin": {
+    "enabled": true,
+    "username": "admin",
+    "password": {
+      "secret_name": "clotilde-admin-test",
+      "use_existing_secret": true
+    }
+  }
+}

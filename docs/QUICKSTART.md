@@ -10,64 +10,60 @@
 
 ## 5-Minute Setup
 
-### 1. Set Secret Names
-
-Choose unique, unpredictable names for your secrets:
+### 1. Run the Guided Wizard
 
 ```bash
-# Generate unique secret names (recommended for security)
-export OPENAI_SECRET="my-openai-key-$(openssl rand -hex 4)"
-export API_SECRET="my-api-key-$(openssl rand -hex 4)"
-
-# Save these names - you'll need them!
-echo "OPENAI_SECRET=$OPENAI_SECRET"
-echo "API_SECRET=$API_SECRET"
+go run ./cmd/clotilde-setup
 ```
 
-### 2. Run Setup Script
-
-```bash
-chmod +x setup-gcloud.sh
-./setup-gcloud.sh
-```
-
-This will:
+The wizard will:
+- Check `gcloud`, Docker, active Google Cloud project, billing visibility, and Docker registry auth
 - Enable required Google Cloud APIs
-- Create Artifact Registry repository
-- Create secrets in Secret Manager (with your unique names)
-- Configure IAM permissions
+- Create Artifact Registry and Secret Manager resources
+- Deploy to Cloud Run
+- Verify `/health` and `/admin/`
+- Write a sanitized deployment summary to `.clotilde/setup-result.json`
 
-### 3. Deploy to Cloud Run
+### 2. Non-Interactive Agent Setup
 
 ```bash
-# Set required environment variables
-export OPENAI_SECRET=your-openai-secret-name
-export API_SECRET=your-api-secret-name
-
-# Optional: Enable admin dashboard
-export ADMIN_USER=admin
-export ADMIN_SECRET=your-admin-password-secret-name
-
-# Deploy
-chmod +x deploy.sh
-./deploy.sh
+go run ./cmd/clotilde-setup \
+  --non-interactive \
+  --config setup.json \
+  --output json \
+  --yes
 ```
 
-### 4. Get Your Service URL
+Use `--dry-run` to inspect the planned command sequence without changing Google Cloud resources:
+
+```bash
+go run ./cmd/clotilde-setup \
+  --non-interactive \
+  --config cmd/clotilde-setup/testdata/minimal.json \
+  --output json \
+  --yes \
+  --dry-run
+```
+
+### 3. Get Your Service URL
 
 ```bash
 gcloud run services describe clotilde --region us-central1 --format="value(status.url)"
 ```
 
-### 5. Get Your API Key
+### 4. Get Your API Key
 
 ```bash
-gcloud secrets versions access latest --secret="$API_SECRET"
+gcloud secrets versions access latest --secret="<your-api-secret-name>"
 ```
 
-### 6. Set Up Apple Shortcut
+### 5. Set Up Apple Shortcut
 
 Follow the instructions in [SHORTCUT_SETUP.md](SHORTCUT_SETUP.md) to create the shortcut on your iPhone.
+
+### Manual / Advanced Scripts
+
+`setup-gcloud.sh` and `deploy.sh` remain supported for manual deployments. In those scripts, `OPENAI_SECRET` and `API_SECRET` are Secret Manager secret names; inside Cloud Run, `OPENAI_KEY_SECRET_NAME` and `API_KEY_SECRET_NAME` are mounted secret values consumed by the service.
 
 ## Testing
 
@@ -120,4 +116,3 @@ See [Runtime Configuration](#runtime-configuration-no-redeployment-needed) in RE
 ### Rate limit errors
 - Default: 10 requests/minute, 100 requests/hour
 - Adjust in `internal/ratelimit/ratelimit.go` if needed
-
