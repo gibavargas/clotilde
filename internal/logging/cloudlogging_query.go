@@ -63,7 +63,7 @@ func QueryCloudLogs(ctx context.Context, projectID string, opts QueryOptions) ([
 
 	// Query Cloud Logging
 	it := client.ListLogEntries(ctx, req)
-	
+
 	var entries []LogEntry
 	var totalCount int
 
@@ -155,8 +155,14 @@ func convertCloudLogEntry(cloudEntry *loggingpb.LogEntry) *LogEntry {
 	if errMsg, ok := payload["error_message"].(string); ok {
 		entry.ErrorMessage = errMsg
 	}
+	if rawInput, ok := payload["raw_input"].(string); ok {
+		entry.RawInput = rawInput
+	}
 	if input, ok := payload["input"].(string); ok {
 		entry.Input = input
+		if entry.RawInput == "" {
+			entry.RawInput = input
+		}
 	}
 	if output, ok := payload["output"].(string); ok {
 		entry.Output = output

@@ -266,89 +266,18 @@ func main() {
 	}
 	defer secretClient.Close()
 
-	// Get OpenAI API key - prefer environment variable (Cloud Run secrets) over Secret Manager
-	openaiKey := os.Getenv("OPENAI_KEY_SECRET_NAME")
-	if openaiKey == "" {
-		// Fallback to Secret Manager for local development
-		projectID := os.Getenv("GOOGLE_CLOUD_PROJECT")
-		if projectID == "" {
-			log.Fatal("GOOGLE_CLOUD_PROJECT environment variable not set")
-		}
-		// Secret name must be configured via environment variable (not hardcoded for security)
-		openaiSecretName := os.Getenv("OPENAI_SECRET_NAME")
-		if openaiSecretName == "" {
-			log.Fatal("OPENAI_SECRET_NAME environment variable not set (required for Secret Manager lookup)")
-		}
-		var err error
-		openaiKey, err = getSecret(ctx, secretClient, projectID, openaiSecretName)
-		if err != nil {
-			log.Fatalf("Failed to get OpenAI API key: %v", err)
-		}
+	openaiKey, err := loadRequiredSecret(ctx, secretClient, "OPENAI_KEY_SECRET_NAME", "OPENAI_SECRET_NAME", "OpenAI API key")
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	// Get API key secret for authentication - prefer environment variable over Secret Manager
-	apiKeySecret := os.Getenv("API_KEY_SECRET_NAME")
-	if apiKeySecret == "" {
-		// Fallback to Secret Manager for local development
-		projectID := os.Getenv("GOOGLE_CLOUD_PROJECT")
-		if projectID == "" {
-			log.Fatal("GOOGLE_CLOUD_PROJECT environment variable not set")
-		}
-		// Secret name must be configured via environment variable (not hardcoded for security)
-		apiSecretName := os.Getenv("API_SECRET_NAME")
-		if apiSecretName == "" {
-			log.Fatal("API_SECRET_NAME environment variable not set (required for Secret Manager lookup)")
-		}
-		var err error
-		apiKeySecret, err = getSecret(ctx, secretClient, projectID, apiSecretName)
-		if err != nil {
-			log.Fatalf("Failed to get API key secret: %v", err)
-		}
+	apiKeySecret, err := loadRequiredSecret(ctx, secretClient, "API_KEY_SECRET_NAME", "API_SECRET_NAME", "API key secret")
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	// Get Perplexity API key - prefer environment variable (Cloud Run secrets) over Secret Manager
-	perplexityKey := os.Getenv("PERPLEXITY_KEY_SECRET_NAME")
-	if perplexityKey == "" {
-		// Fallback to Secret Manager for local development
-		projectID := os.Getenv("GOOGLE_CLOUD_PROJECT")
-		if projectID == "" {
-			log.Fatal("GOOGLE_CLOUD_PROJECT environment variable not set")
-		}
-		// Secret name must be configured via environment variable (not hardcoded for security)
-		perplexitySecretName := os.Getenv("PERPLEXITY_SECRET_NAME")
-		if perplexitySecretName == "" {
-			// Perplexity is optional, so we don't fatal here - just log and continue
-			log.Printf("PERPLEXITY_SECRET_NAME not set - Perplexity Search API will be disabled")
-			perplexityKey = ""
-		} else {
-			var err error
-			perplexityKey, err = getSecret(ctx, secretClient, projectID, perplexitySecretName)
-			if err != nil {
-				log.Printf("Failed to get Perplexity API key: %v - Perplexity Search API will be disabled", err)
-				perplexityKey = ""
-			}
-		}
-	}
-
-	// Get Claude API key - prefer environment variable (Cloud Run secrets) over Secret Manager
-	claudeKey := os.Getenv("CLAUDE_KEY_SECRET_NAME")
-	if claudeKey == "" {
-		// Fallback to Secret Manager for local development
-		projectID := os.Getenv("GOOGLE_CLOUD_PROJECT")
-		claudeSecretName := os.Getenv("CLAUDE_SECRET_NAME")
-		if claudeSecretName == "" {
-			// Claude is optional - just log and continue
-			log.Printf("CLAUDE_SECRET_NAME not set - Claude API will be disabled (using OpenAI only)")
-			claudeKey = ""
-		} else if projectID != "" {
-			var err error
-			claudeKey, err = getSecret(ctx, secretClient, projectID, claudeSecretName)
-			if err != nil {
-				log.Printf("Failed to get Claude API key: %v - Claude API will be disabled", err)
-				claudeKey = ""
-			}
-		}
-	}
+	perplexityKey := loadOptionalSecret(ctx, secretClient, "PERPLEXITY_KEY_SECRET_NAME", "PERPLEXITY_SECRET_NAME", "Perplexity Search API")
+	claudeKey := loadOptionalSecret(ctx, secretClient, "CLAUDE_KEY_SECRET_NAME", "CLAUDE_SECRET_NAME", "Claude API")
 	if claudeKey != "" {
 		log.Printf("Claude API enabled - fast responses available")
 	}
@@ -486,6 +415,53 @@ func getSecret(ctx context.Context, client *secretmanager.Client, projectID, sec
 	return string(result.Payload.Data), nil
 }
 
+func loadRequiredSecret(ctx context.Context, client *secretmanager.Client, valueEnv, secretNameEnv, label string) (string, error) {
+	if value := os.Getenv(valueEnv); value != "" {
+		return value, nil
+	}
+
+	projectID := os.Getenv("GOOGLE_CLOUD_PROJECT")
+	if projectID == "" {
+		return "", fmt.Errorf("GOOGLE_CLOUD_PROJECT environment variable not set")
+	}
+
+	secretName := os.Getenv(secretNameEnv)
+	if secretName == "" {
+		return "", fmt.Errorf("%s environment variable not set (required for Secret Manager lookup)", secretNameEnv)
+	}
+
+	value, err := getSecret(ctx, client, projectID, secretName)
+	if err != nil {
+		return "", fmt.Errorf("failed to get %s: %w", label, err)
+	}
+	return value, nil
+}
+
+func loadOptionalSecret(ctx context.Context, client *secretmanager.Client, valueEnv, secretNameEnv, feature string) string {
+	if value := os.Getenv(valueEnv); value != "" {
+		return value
+	}
+
+	secretName := os.Getenv(secretNameEnv)
+	if secretName == "" {
+		log.Printf("%s not set - %s will be disabled", secretNameEnv, feature)
+		return ""
+	}
+
+	projectID := os.Getenv("GOOGLE_CLOUD_PROJECT")
+	if projectID == "" {
+		log.Printf("%s set but GOOGLE_CLOUD_PROJECT not set - %s will be disabled", secretNameEnv, feature)
+		return ""
+	}
+
+	value, err := getSecret(ctx, client, projectID, secretName)
+	if err != nil {
+		log.Printf("Failed to get %s key: %v - %s will be disabled", feature, err, feature)
+		return ""
+	}
+	return value
+}
+
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	stats := s.logger.GetStats()
 
@@ -545,13 +521,13 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 
 	var req ChatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.logRequest(requestID, r, "", "", "", "", time.Since(startTime), "error", "Invalid request body")
+		s.logRequest(requestID, r, "", "", "", "", "", time.Since(startTime), "error", "Invalid request body")
 		respondError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	if req.Message == "" {
-		s.logRequest(requestID, r, "", "", "", "", time.Since(startTime), "error", "Message is required")
+		s.logRequest(requestID, r, "", "", "", "", "", time.Since(startTime), "error", "Message is required")
 		respondError(w, "Message is required", http.StatusBadRequest)
 		return
 	}
@@ -559,7 +535,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	// Sanitize input to prevent prompt injection attacks (OWASP LLM Top 10 A1)
 	sanitizedMessage, err := promptinjection.ValidateInput(req.Message)
 	if err != nil {
-		s.logRequest(requestID, r, "", "", "", "", time.Since(startTime), "error", "Invalid input: "+err.Error())
+		s.logRequest(requestID, r, req.Message, "", "", "", "", time.Since(startTime), "error", "Invalid input: "+err.Error())
 		respondError(w, "Invalid input", http.StatusBadRequest)
 		return
 	}
@@ -600,9 +576,9 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	response, err := s.createResponse(ctx, internalRoute, systemPrompt, sanitizedMessage)
 	if err != nil {
 		log.Printf("[%s] OpenAI Responses API error: %v", requestID, err)
-		// Log original message for debugging, but use sanitized for API calls
-		s.logRequest(requestID, r, sanitizedMessage, "", route.Model, string(route.Category), time.Since(startTime), "error", err.Error())
-		
+		// Log the raw message for auditability, but use sanitized for API calls
+		s.logRequest(requestID, r, req.Message, sanitizedMessage, "", route.Model, string(route.Category), time.Since(startTime), "error", err.Error())
+
 		// Check if it's a timeout error and provide friendly message
 		if ctx.Err() == context.DeadlineExceeded || strings.Contains(err.Error(), "context deadline exceeded") || strings.Contains(err.Error(), "timeout") {
 			// Provide a helpful response for timeouts - spoken via CarPlay
@@ -620,31 +596,35 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	// Log successful request
 	responseTime := time.Since(startTime)
 	log.Printf("[%s] Response generated: Length=%d, Time=%v", requestID, len(response), responseTime)
-	// Log sanitized message (original stored separately if needed for audit)
-	s.logRequest(requestID, r, sanitizedMessage, response, route.Model, string(route.Category), responseTime, "success", "")
+	// Log the raw message for auditability while preserving the sanitized form for processing
+	s.logRequest(requestID, r, req.Message, sanitizedMessage, response, route.Model, string(route.Category), responseTime, "success", "")
 
 	respondSuccess(w, response)
 }
 
-// logRequest adds a structured log entry with full input/output for Cloud Logging
-func (s *Server) logRequest(requestID string, r *http.Request, input, output, model, category string, responseTime time.Duration, status, errorMsg string) {
+// logRequest adds a structured log entry with raw and sanitized input for Cloud Logging
+func (s *Server) logRequest(requestID string, r *http.Request, rawInput, sanitizedInput, output, model, category string, responseTime time.Duration, status, errorMsg string) {
 	// Apply PII redaction if enabled
-	loggedInput := input
+	loggedRawInput := rawInput
+	loggedInput := sanitizedInput
 	loggedOutput := output
 	if logging.IsRedactPIIEnabled() {
-		loggedInput = logging.RedactPII(input)
+		loggedRawInput = logging.RedactPII(rawInput)
+		loggedInput = logging.RedactPII(sanitizedInput)
 		loggedOutput = logging.RedactPII(output)
 	}
 
 	// Check if full content logging is enabled
 	// If disabled, only log metadata (lengths, hashes, etc.)
-	var finalInput, finalOutput string
+	var finalRawInput, finalInput, finalOutput string
 	if logging.ShouldLogFullContent() {
+		finalRawInput = loggedRawInput
 		finalInput = loggedInput
 		finalOutput = loggedOutput
 	} else {
 		// Full content logging disabled - only log metadata
-		// Input and Output fields will be empty, but lengths are preserved
+		// Content fields will be empty, but lengths are preserved
+		finalRawInput = ""
 		finalInput = ""
 		finalOutput = ""
 	}
@@ -653,13 +633,14 @@ func (s *Server) logRequest(requestID string, r *http.Request, input, output, mo
 		ID:            requestID,
 		Timestamp:     time.Now(),
 		IPHash:        hashIP(r.RemoteAddr),
-		MessageLength: len(input), // Always log original length, even if content is redacted
+		MessageLength: len(rawInput), // Always log original length, even if content is redacted
 		Model:         model,
 		Category:      category,
 		ResponseTime:  responseTime.Milliseconds(),
-		TokenEstimate: len(input) / 4, // Rough estimate: ~4 chars per token
+		TokenEstimate: len(rawInput) / 4, // Rough estimate: ~4 chars per token
 		Status:        status,
 		ErrorMessage:  errorMsg,
+		RawInput:      finalRawInput,
 		Input:         finalInput,
 		Output:        finalOutput,
 	}
@@ -1395,12 +1376,21 @@ func (s *Server) buildSystemPrompt(config admin.RuntimeConfig, category router.C
 				// Ultimate fallback to default
 				basePrompt = clotildeBaseSystemPromptTemplate
 			}
-			return fmt.Sprintf(basePrompt, currentTime)
+			return injectCurrentTime(basePrompt, currentTime)
 		}
 	}
 
 	// Category prompts are self-contained and include %s for date/time
-	return fmt.Sprintf(categoryPrompt, currentTime)
+	return injectCurrentTime(categoryPrompt, currentTime)
+}
+
+// injectCurrentTime replaces the optional time placeholder without invoking fmt formatting.
+// Runtime category prompts are allowed to omit %s, and literal percent signs should stay literal.
+func injectCurrentTime(prompt, currentTime string) string {
+	if !strings.Contains(prompt, "%s") {
+		return prompt
+	}
+	return strings.ReplaceAll(prompt, "%s", currentTime)
 }
 
 // modelSupportsReasoning checks if a model supports the reasoning parameter

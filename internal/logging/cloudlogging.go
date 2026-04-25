@@ -113,6 +113,7 @@ func (cl *CloudLogger) Log(entry LogEntry) {
 		"response_time_ms": entry.ResponseTime,
 		"token_estimate":   entry.TokenEstimate,
 		"status":           entry.Status,
+		"raw_input":        entry.RawInput,
 		"input":            entry.Input,
 		"output":           entry.Output,
 	}
@@ -157,4 +158,3 @@ func (cl *CloudLogger) Flush() error {
 	}
 	return nil
 }
-

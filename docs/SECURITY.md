@@ -11,7 +11,7 @@ Clotilde CarPlay Assistant implements multiple layers of security to protect use
 1. **User Prompts**: Voice input from CarPlay users
 2. **API Keys**: OpenAI API key and service authentication key
 3. **Service Availability**: Protection against DDoS and abuse
-4. **User Privacy**: No data retention or logging of sensitive information
+4. **User Privacy**: Full prompts and responses are logged for admin/audit visibility, so access control and retention policy matter
 
 ### Threat Vectors
 
@@ -241,7 +241,7 @@ This means that any Personal Identifiable Information (PII), sensitive data, hea
    - Protected by HTTP Basic Authentication
    - Requires admin username and password (set via `ADMIN_USER` and `ADMIN_PASSWORD` environment variables)
    - Only authenticated admin users can view logs
-   - Logs displayed in detail view with full input/output content
+   - Logs displayed in detail view with full raw question/output content
 2. **Google Cloud Logging**:
    - Requires IAM permissions to access:
      - `roles/logging.viewer` - View logs in Cloud Logging console
@@ -416,4 +416,3 @@ Before deploying to production:
 ## Contact
 
 For security issues, please contact the project maintainer directly.
-

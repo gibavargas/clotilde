@@ -10,6 +10,8 @@ const limit = 50;
 let totalEntries = 0;
 let autoRefreshInterval = null;
 let expandedRows = new Set();
+let lastLogSignature = '';
+let lastLogQueryKey = '';
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -26,7 +28,7 @@ function setupAutoRefresh() {
         if (autoRefreshInterval) clearInterval(autoRefreshInterval);
         autoRefreshInterval = setInterval(() => {
             loadStats();
-            if (currentOffset === 0) loadLogs(); // Only refresh if on first page
+            if (currentOffset === 0) loadLogs({ silent: true }); // Update dynamic content without full-page refresh
         }, 10000);
     };
 
@@ -67,9 +69,14 @@ async function loadStats() {
     }
 }
 
-async function loadLogs() {
+async function loadLogs(options = {}) {
+    const { silent = false } = options;
     const container = document.getElementById('logsContainer');
-    container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+    const hasExistingTable = container.querySelector('.logs-table') !== null;
+
+    if (!silent || !hasExistingTable) {
+        container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+    }
 
     try {
         const params = new URLSearchParams({
@@ -81,6 +88,7 @@ async function loadLogs() {
         const status = document.getElementById('filterStatus').value;
         const startDate = document.getElementById('filterStartDate').value;
         const endDate = document.getElementById('filterEndDate').value;
+        const queryKey = [currentOffset, model, status, startDate, endDate, limit].join('|');
 
         if (model) params.append('model', model);
         if (status) params.append('status', status);
@@ -91,7 +99,14 @@ async function loadLogs() {
         const data = await response.json();
         
         totalEntries = data.total;
-        renderLogs(data.entries);
+        const signature = buildLogSignature(data.entries);
+        const shouldRerender = queryKey !== lastLogQueryKey || signature !== lastLogSignature || !hasExistingTable;
+
+        if (shouldRerender) {
+            renderLogs(data.entries, { preserveScroll: silent && hasExistingTable });
+            lastLogSignature = signature;
+            lastLogQueryKey = queryKey;
+        }
         updatePagination(data);
     } catch (error) {
         console.error('Failed to load logs:', error);
@@ -99,11 +114,31 @@ async function loadLogs() {
     }
 }
 
-function renderLogs(entries) {
+function buildLogSignature(entries) {
+    if (!entries || entries.length === 0) return 'empty';
+    return entries.map((entry) => {
+        const question = entry.raw_input || entry.input || '';
+        return [
+            entry.id || '',
+            entry.timestamp || '',
+            question,
+            entry.output || '',
+            entry.status || '',
+            entry.response_time_ms || ''
+        ].join('|');
+    }).join('||');
+}
+
+function renderLogs(entries, options = {}) {
+    const { preserveScroll = false } = options;
     const container = document.getElementById('logsContainer');
+    const scrollY = preserveScroll ? window.scrollY : 0;
     
     if (!entries || entries.length === 0) {
         container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📭</div><div>No logs found</div></div>';
+        if (preserveScroll) {
+            requestAnimationFrame(() => window.scrollTo(0, scrollY));
+        }
         return;
     }
 
@@ -127,7 +162,8 @@ function renderLogs(entries) {
 
     entries.forEach((entry, index) => {
         const isExpanded = expandedRows.has(entry.id);
-        const hasContent = entry.input || entry.output;
+        const questionText = entry.raw_input || entry.input || '';
+        const hasContent = questionText || entry.output;
         const safeId = escapeHtml(entry.id);
         
         html += `
@@ -166,10 +202,10 @@ function renderLogs(entries) {
             <tr class="detail-row ${isExpanded ? 'visible' : ''}" id="detail-${safeId}">
                 <td colspan="7" class="detail-cell">
                     <div class="detail-content">
-                        ${entry.input ? `
+                        ${questionText ? `
                             <div class="detail-section">
-                                <div class="detail-label">💬 Input (Question)</div>
-                                <div class="detail-text input">${escapeHtml(entry.input)}</div>
+                                <div class="detail-label">💬 Question</div>
+                                <div class="detail-text input">${escapeHtml(questionText)}</div>
                             </div>
                         ` : ''}
                         ${entry.output ? `
@@ -189,6 +225,9 @@ function renderLogs(entries) {
 
     container.innerHTML = '';
     container.appendChild(table);
+    if (preserveScroll) {
+        requestAnimationFrame(() => window.scrollTo(0, scrollY));
+    }
 }
 
 function toggleDetails(id) {
@@ -245,9 +284,13 @@ function updatePagination(data) {
 
     pagination.style.display = 'flex';
     
-    const start = data.offset + 1;
-    const end = data.offset + data.count;
-    info.textContent = `Showing ${start}-${end} of ${data.total} entries`;
+    if (data.count === 0) {
+        info.textContent = `Showing 0 of ${data.total} entries`;
+    } else {
+        const start = data.offset + 1;
+        const end = data.offset + data.count;
+        info.textContent = `Showing ${start}-${end} of ${data.total} entries`;
+    }
 
     prevBtn.disabled = currentOffset === 0;
     nextBtn.disabled = currentOffset + data.count >= data.total;
@@ -400,4 +443,3 @@ function showToast(message, type) {
         toast.classList.remove('show');
     }, 3000);
 }
-

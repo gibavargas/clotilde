@@ -533,7 +533,7 @@ curl -X POST https://your-service-url.run.app/api/config \
 - **Rate Limiting**: 10 requests/minute per API key, 100 requests/hour per IP
 - **Input Validation**: Max 1000 characters per message, 5KB request size limit
 - **Secrets Management**: All sensitive data in Google Secret Manager
-- **Secure Logging**: No sensitive data in logs (only metadata)
+- **Secure Logging**: Full prompts/responses are visible in the authenticated admin dashboard and Cloud Logging
 - **HTTPS Only**: Enforced by Cloud Run
 - **Non-root Container**: Runs as unprivileged user
 - **No Secrets in Code**: All API keys and sensitive data use environment variables or Secret Manager

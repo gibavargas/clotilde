@@ -20,18 +20,19 @@ type LogEntry struct {
 	TokenEstimate int       `json:"token_estimate"`
 	Status        string    `json:"status"` // "success" or "error"
 	ErrorMessage  string    `json:"error_message,omitempty"`
-	Input         string    `json:"input,omitempty"`  // Full user input (question)
-	Output        string    `json:"output,omitempty"` // Full AI response
+	RawInput      string    `json:"raw_input,omitempty"` // Raw user question as received
+	Input         string    `json:"input,omitempty"`     // Legacy sanitized input
+	Output        string    `json:"output,omitempty"`    // Full AI response
 }
 
 // Stats represents aggregated statistics
 type Stats struct {
-	TotalRequests      int64     `json:"total_requests"`
-	TotalRequestsToday int64     `json:"total_requests_today"`
-	AvgResponseTimeMs  float64   `json:"avg_response_time_ms"`
-	ErrorRate          float64   `json:"error_rate"`
+	TotalRequests      int64      `json:"total_requests"`
+	TotalRequestsToday int64      `json:"total_requests_today"`
+	AvgResponseTimeMs  float64    `json:"avg_response_time_ms"`
+	ErrorRate          float64    `json:"error_rate"`
 	ModelUsage         ModelUsage `json:"model_usage"`
-	Uptime             string    `json:"uptime"`
+	Uptime             string     `json:"uptime"`
 	LastRequestTime    *time.Time `json:"last_request_time,omitempty"`
 }
 
@@ -39,7 +40,7 @@ type Stats struct {
 type ModelUsage struct {
 	Standard int64 `json:"standard"` // Fast/cheap models (gpt-4o-mini, Claude Haiku, etc.)
 	Premium  int64 `json:"premium"`  // Powerful/expensive models (gpt-4o, Claude Sonnet, etc.)
-	
+
 	// Legacy fields for backward compatibility
 	Nano int64 `json:"nano"` // Deprecated: use Standard
 	Full int64 `json:"full"` // Deprecated: use Premium
@@ -65,6 +66,19 @@ var (
 	once         sync.Once
 )
 
+// NewLogger creates a ring buffer logger with the requested capacity.
+// It is useful for tests and for callers that need an isolated logger instance.
+func NewLogger(capacity int) *Logger {
+	if capacity <= 0 {
+		capacity = 1000
+	}
+	return &Logger{
+		entries:   make([]LogEntry, capacity),
+		capacity:  capacity,
+		startTime: time.Now(),
+	}
+}
+
 // GetLogger returns the singleton logger instance
 func GetLogger() *Logger {
 	once.Do(func() {
@@ -74,11 +88,7 @@ func GetLogger() *Logger {
 				capacity = size
 			}
 		}
-		globalLogger = &Logger{
-			entries:   make([]LogEntry, capacity),
-			capacity:  capacity,
-			startTime: time.Now(),
-		}
+		globalLogger = NewLogger(capacity)
 	})
 	return globalLogger
 }
@@ -110,7 +120,7 @@ func (l *Logger) Add(entry LogEntry) {
 		strings.Contains(modelLower, "haiku") ||
 		strings.Contains(modelLower, "nano") ||
 		strings.Contains(modelLower, "3.5-turbo")
-	
+
 	if isStandard {
 		l.standardCount++
 	} else {
@@ -146,10 +156,10 @@ func (l *Logger) GetEntries(limit, offset int) []LogEntry {
 	}
 
 	result := make([]LogEntry, limit)
-	
+
 	// Start from most recent entry and go backwards
 	startIdx := (l.head - 1 - offset + l.capacity) % l.capacity
-	
+
 	for i := 0; i < limit; i++ {
 		idx := (startIdx - i + l.capacity) % l.capacity
 		result[i] = l.entries[idx]
@@ -168,19 +178,19 @@ func (l *Logger) GetEntriesFiltered(limit, offset int, model, status string, sta
 	}
 
 	var filtered []LogEntry
-	
+
 	// Start from most recent entry and go backwards
 	startIdx := (l.head - 1 + l.capacity) % l.capacity
-	
+
 	for i := 0; i < l.count; i++ {
 		idx := (startIdx - i + l.capacity) % l.capacity
 		entry := l.entries[idx]
-		
+
 		// Skip entries with zero timestamp (empty slots in ring buffer)
 		if entry.Timestamp.IsZero() {
 			continue
 		}
-		
+
 		// Apply filters
 		if model != "" && entry.Model != model {
 			continue
@@ -194,7 +204,7 @@ func (l *Logger) GetEntriesFiltered(limit, offset int, model, status string, sta
 		if endDate != nil && entry.Timestamp.After(*endDate) {
 			continue
 		}
-		
+
 		filtered = append(filtered, entry)
 	}
 
@@ -202,7 +212,7 @@ func (l *Logger) GetEntriesFiltered(limit, offset int, model, status string, sta
 	if offset >= len(filtered) {
 		return []LogEntry{}
 	}
-	
+
 	filtered = filtered[offset:]
 	if limit > 0 && limit < len(filtered) {
 		filtered = filtered[:limit]
@@ -231,7 +241,7 @@ func (l *Logger) GetStats() Stats {
 	// Calculate today's requests
 	now := time.Now()
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	
+
 	for i := 0; i < l.count; i++ {
 		idx := (l.head - 1 - i + l.capacity) % l.capacity
 		entry := l.entries[idx]
@@ -271,4 +281,3 @@ func (l *Logger) GetCount() int {
 	defer l.mu.RUnlock()
 	return l.count
 }
-
