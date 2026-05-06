@@ -676,6 +676,9 @@ const dashboardHTML = `<!DOCTYPE html>
                             <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>
                             <option value="claude-3-5-haiku-latest">Claude 3.5 Haiku (Latest)</option>
                         </optgroup>
+                        <optgroup label="OpenRouter">
+                            <option value="openrouter/anthropic/claude-haiku-4.5">Claude Haiku 4.5 via OpenRouter</option>
+                        </optgroup>
                         <optgroup label="OpenAI - GPT-4o">
                             <option value="gpt-4o-mini">gpt-4o-mini</option>
                             <option value="gpt-4o">gpt-4o</option>
@@ -710,6 +713,9 @@ const dashboardHTML = `<!DOCTYPE html>
                             <option value="claude-3-5-sonnet-latest">Claude 3.5 Sonnet (Latest)</option>
                             <option value="claude-sonnet-4-20250514">Claude Sonnet 4 (Most Capable)</option>
                             <option value="claude-3-opus-20240229">Claude 3 Opus (Highest Quality)</option>
+                        </optgroup>
+                        <optgroup label="OpenRouter">
+                            <option value="openrouter/anthropic/claude-haiku-4.5">Claude Haiku 4.5 via OpenRouter</option>
                         </optgroup>
                         <optgroup label="OpenAI - GPT-4o">
                             <option value="gpt-4o">gpt-4o</option>
@@ -748,7 +754,7 @@ const dashboardHTML = `<!DOCTYPE html>
                     <span>Enable Perplexity Search API for Web Search</span>
                 </label>
                 <div class="stat-subtitle" style="margin-top: 8px; margin-left: 32px;">
-                    When enabled, uses Perplexity AI Search API instead of OpenAI's web_search tool for web search queries. Enabled by default.
+                    When enabled, uses Perplexity AI Search API before provider-native web search fallbacks. Enabled by default.
                 </div>
             </div>
 
@@ -811,6 +817,9 @@ const dashboardHTML = `<!DOCTYPE html>
                             <option value="claude-3-5-sonnet-latest">Claude 3.5 Sonnet (Latest)</option>
                             <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
                             <option value="claude-3-opus-20240229">Claude 3 Opus</option>
+                        </optgroup>
+                        <optgroup label="OpenRouter">
+                            <option value="openrouter/anthropic/claude-haiku-4.5">Claude Haiku 4.5 via OpenRouter</option>
                         </optgroup>
                         <optgroup label="OpenAI">
                             <option value="gpt-4o-mini">gpt-4o-mini</option>

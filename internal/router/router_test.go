@@ -29,6 +29,24 @@ func TestRoute(t *testing.T) {
 			expectedWebSearch: true,
 		},
 		{
+			name:              "Web Search - New Car Price",
+			question:          "Quanto custa um Honda HR-V zero km?",
+			expectedCategory:  CategoryWebSearch,
+			expectedWebSearch: true,
+		},
+		{
+			name:              "Web Search - 0km Car Price",
+			question:          "Qual o valor de um Corolla 0km?",
+			expectedCategory:  CategoryWebSearch,
+			expectedWebSearch: true,
+		},
+		{
+			name:              "Web Search - Hilux SW4 Price Today",
+			question:          "qual o preço de uma hilux sw4 0km hoje?",
+			expectedCategory:  CategoryWebSearch,
+			expectedWebSearch: true,
+		},
+		{
 			name:              "Complex - Explain",
 			question:          "Explique a teoria da relatividade",
 			expectedCategory:  CategoryComplex,
@@ -50,7 +68,7 @@ func TestRoute(t *testing.T) {
 			name:              "Factual - Static Fact",
 			question:          "Qual a capital da França?",
 			expectedCategory:  CategoryFactual,
-			expectedWebSearch: false,
+			expectedWebSearch: true,
 		},
 		{
 			name:              "Mathematical - Calculate",

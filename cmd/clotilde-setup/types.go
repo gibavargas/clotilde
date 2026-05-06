@@ -4,18 +4,20 @@ import "time"
 
 // SetupConfig is the machine-readable input contract for the deployment wizard.
 type SetupConfig struct {
-	ProjectID     string         `json:"project_id"`
-	Region        string         `json:"region"`
-	ServiceName   string         `json:"service_name"`
-	RepoName      string         `json:"repo_name"`
-	ImageTag      string         `json:"image_tag,omitempty"`
-	LogBufferSize int            `json:"log_buffer_size,omitempty"`
-	OpenAI        SecretConfig   `json:"openai"`
-	API           SecretConfig   `json:"api"`
-	Claude        ProviderConfig `json:"claude,omitempty"`
-	Perplexity    ProviderConfig `json:"perplexity,omitempty"`
-	ConfigAPI     ProviderConfig `json:"config_api,omitempty"`
-	Admin         AdminConfig    `json:"admin,omitempty"`
+	Implementation string         `json:"implementation,omitempty"`
+	ProjectID      string         `json:"project_id"`
+	Region         string         `json:"region"`
+	ServiceName    string         `json:"service_name"`
+	RepoName       string         `json:"repo_name"`
+	ImageTag       string         `json:"image_tag,omitempty"`
+	LogBufferSize  int            `json:"log_buffer_size,omitempty"`
+	OpenAI         SecretConfig   `json:"openai"`
+	API            SecretConfig   `json:"api"`
+	Claude         ProviderConfig `json:"claude,omitempty"`
+	OpenRouter     ProviderConfig `json:"openrouter,omitempty"`
+	Perplexity     ProviderConfig `json:"perplexity,omitempty"`
+	ConfigAPI      ProviderConfig `json:"config_api,omitempty"`
+	Admin          AdminConfig    `json:"admin,omitempty"`
 }
 
 // SecretConfig describes a Secret Manager secret and how its value should be sourced.
@@ -42,16 +44,17 @@ type AdminConfig struct {
 
 // SetupResult is the machine-readable output contract for OpenClaw-style agents.
 type SetupResult struct {
-	OK           bool              `json:"ok"`
-	ServiceURL   string            `json:"service_url,omitempty"`
-	Secrets      map[string]string `json:"secrets,omitempty"`
-	AdminEnabled bool              `json:"admin_enabled"`
-	NextSteps    []string          `json:"next_steps,omitempty"`
-	ResultPath   string            `json:"result_path,omitempty"`
-	Commands     []LoggedCommand   `json:"commands,omitempty"`
-	Error        string            `json:"error,omitempty"`
-	StartedAt    time.Time         `json:"started_at,omitempty"`
-	FinishedAt   time.Time         `json:"finished_at,omitempty"`
+	OK             bool              `json:"ok"`
+	Implementation string            `json:"implementation,omitempty"`
+	ServiceURL     string            `json:"service_url,omitempty"`
+	Secrets        map[string]string `json:"secrets,omitempty"`
+	AdminEnabled   bool              `json:"admin_enabled"`
+	NextSteps      []string          `json:"next_steps,omitempty"`
+	ResultPath     string            `json:"result_path,omitempty"`
+	Commands       []LoggedCommand   `json:"commands,omitempty"`
+	Error          string            `json:"error,omitempty"`
+	StartedAt      time.Time         `json:"started_at,omitempty"`
+	FinishedAt     time.Time         `json:"finished_at,omitempty"`
 }
 
 // LoggedCommand is a sanitized command record used by dry-run and tests.
@@ -66,6 +69,9 @@ type Options struct {
 	NonInteractive bool
 	ConfigPath     string
 	Output         string
+	Implementation string
+	Template       string
+	Wizard         bool
 	Yes            bool
 	DryRun         bool
 	SkipBuild      bool

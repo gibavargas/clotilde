@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/clotilde/carplay-assistant/internal/auth"
+	"github.com/clotilde/carplay-assistant/internal/clientip"
 )
 
 type rateLimiter struct {
@@ -18,17 +19,17 @@ var (
 	globalLimiter = &rateLimiter{
 		requests: make(map[string][]time.Time),
 	}
-	
+
 	// Pre-auth IP-based rate limiter for brute force protection
 	preAuthLimiter = &rateLimiter{
 		requests: make(map[string][]time.Time),
 	}
-	
+
 	// Rate limits
 	requestsPerMinute = 10
 	requestsPerHour   = 100
 	cleanupInterval   = 5 * time.Minute
-	
+
 	// Pre-auth rate limits (stricter to prevent brute force)
 	preAuthRequestsPerMinute = 5  // Lower limit before authentication
 	preAuthRequestsPerHour   = 20 // Lower hourly limit
@@ -128,7 +129,7 @@ func Middleware() func(http.Handler) http.Handler {
 			// Get validated API key from context (set by auth.Middleware)
 			// Only use API key if it has been validated to prevent rate limit bypass
 			validatedAPIKey := auth.GetValidatedAPIKey(r.Context())
-			
+
 			var key string
 			if validatedAPIKey != "" {
 				// Use validated API key for rate limiting
@@ -136,7 +137,7 @@ func Middleware() func(http.Handler) http.Handler {
 			} else {
 				// Fallback to IP address if no validated API key
 				// This should only happen if auth middleware was skipped
-				ip := getClientIP(r)
+				ip := clientip.FromRequest(r)
 				key = ip
 			}
 
@@ -151,71 +152,7 @@ func Middleware() func(http.Handler) http.Handler {
 }
 
 func getClientIP(r *http.Request) string {
-	// Check X-Real-IP header first (most trusted in Google Cloud Run)
-	// Cloud Run sets X-Real-IP reliably and strips user input, making it safe to trust
-	realIP := r.Header.Get("X-Real-IP")
-	if realIP != "" {
-		realIP = strings.TrimSpace(realIP)
-		// Remove port if present
-		if strings.HasPrefix(realIP, "[") {
-			// IPv6 with brackets
-			if idx := strings.Index(realIP, "]:"); idx != -1 {
-				realIP = realIP[:idx+1]
-			}
-		} else {
-			// IPv4 or IPv6 without brackets
-			if idx := strings.Index(realIP, ":"); idx != -1 {
-				realIP = realIP[:idx]
-			}
-		}
-		return realIP
-	}
-
-	// Fallback to X-Forwarded-For header (Cloud Run appends real IP to existing header)
-	// In Cloud Run: if attacker sends "X-Forwarded-For: 1.2.3.4", Cloud Run appends real IP
-	// Result: "1.2.3.4, <Real-IP>". We must take the RIGHTmost IP (after trusted proxies)
-	forwarded := r.Header.Get("X-Forwarded-For")
-	if forwarded != "" {
-		// Extract rightmost IP (most recent, added by Cloud Run)
-		// X-Forwarded-For format: "client, proxy1, proxy2" or "spoofed, real-ip"
-		ips := strings.Split(forwarded, ",")
-		if len(ips) > 0 {
-			// Take the last (rightmost) IP
-			forwarded = strings.TrimSpace(ips[len(ips)-1])
-		} else {
-			forwarded = strings.TrimSpace(forwarded)
-		}
-		
-		// Remove port if present (e.g., "192.168.1.1:12345" -> "192.168.1.1")
-		// Handle IPv6 addresses with brackets (e.g., "[::1]:12345" -> "[::1]")
-		if strings.HasPrefix(forwarded, "[") {
-			// IPv6 with brackets
-			if idx := strings.Index(forwarded, "]:"); idx != -1 {
-				forwarded = forwarded[:idx+1]
-			}
-		} else {
-			// IPv4 or IPv6 without brackets
-			if idx := strings.Index(forwarded, ":"); idx != -1 {
-				forwarded = forwarded[:idx]
-			}
-		}
-		return forwarded
-	}
-
-	// Final fallback to RemoteAddr (format: "IP:port" or "[IPv6]:port")
-	remoteAddr := r.RemoteAddr
-	if strings.HasPrefix(remoteAddr, "[") {
-		// IPv6 with brackets
-		if idx := strings.Index(remoteAddr, "]:"); idx != -1 {
-			remoteAddr = remoteAddr[:idx+1]
-		}
-	} else {
-		// IPv4 or IPv6 without brackets
-		if idx := strings.Index(remoteAddr, ":"); idx != -1 {
-			remoteAddr = remoteAddr[:idx]
-		}
-	}
-	return remoteAddr
+	return clientip.FromRequest(r)
 }
 
 // PreAuthMiddleware implements IP-based rate limiting BEFORE authentication
@@ -231,7 +168,7 @@ func PreAuthMiddleware() func(http.Handler) http.Handler {
 			}
 
 			// Use IP address as key (no API key validation yet)
-			ip := getClientIP(r)
+			ip := clientip.FromRequest(r)
 
 			// Use stricter limits for pre-auth requests
 			if !preAuthLimiter.isAllowedWithLimits(ip, preAuthRequestsPerMinute, preAuthRequestsPerHour) {
@@ -243,4 +180,3 @@ func PreAuthMiddleware() func(http.Handler) http.Handler {
 		})
 	}
 }
-

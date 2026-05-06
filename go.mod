@@ -5,7 +5,6 @@ go 1.25
 require (
 	cloud.google.com/go/logging v1.10.0
 	cloud.google.com/go/secretmanager v1.13.5
-	github.com/sashabaranov/go-openai v1.20.4
 	golang.org/x/text v0.28.0
 	google.golang.org/api v0.233.0
 	google.golang.org/protobuf v1.36.7

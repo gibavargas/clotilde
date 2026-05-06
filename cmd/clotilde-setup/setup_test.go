@@ -41,6 +41,13 @@ func validTestConfig() SetupConfig {
 				Value:      "test-claude-secret",
 			},
 		},
+		OpenRouter: ProviderConfig{
+			Enabled: true,
+			Secret: SecretConfig{
+				SecretName: "clotilde-openrouter-test",
+				Value:      "test-openrouter-secret",
+			},
+		},
 		Perplexity: ProviderConfig{
 			Enabled: true,
 			Secret: SecretConfig{
@@ -98,11 +105,96 @@ func TestValidateConfigAdminRequiresUsernameAndPasswordSource(t *testing.T) {
 func TestValidateConfigOptionalProvidersCanBeDisabled(t *testing.T) {
 	cfg := validTestConfig()
 	cfg.Claude = ProviderConfig{}
+	cfg.OpenRouter = ProviderConfig{}
 	cfg.Perplexity = ProviderConfig{}
 	cfg.ConfigAPI = ProviderConfig{}
 
 	if err := validateConfig(cfg); err != nil {
 		t.Fatalf("disabled optional providers should not require secrets: %v", err)
+	}
+}
+
+func TestValidateConfigRequiresAtLeastOneAIProvider(t *testing.T) {
+	cfg := validTestConfig()
+	cfg.OpenAI = SecretConfig{}
+	cfg.Claude = ProviderConfig{}
+	cfg.OpenRouter = ProviderConfig{}
+
+	err := validateConfig(cfg)
+	if err == nil || !strings.Contains(err.Error(), "at least one AI provider is required") {
+		t.Fatalf("expected AI provider validation error, got %v", err)
+	}
+}
+
+func TestValidateConfigRejectsGeneratedProviderKeys(t *testing.T) {
+	cfg := validTestConfig()
+	cfg.Claude.Secret = SecretConfig{
+		SecretName: "clotilde-claude-test",
+		Generate:   true,
+	}
+
+	err := validateConfig(cfg)
+	if err == nil || !strings.Contains(err.Error(), "claude.secret.generate cannot be used") {
+		t.Fatalf("expected generated provider key validation error, got %v", err)
+	}
+}
+
+func TestValidateConfigRejectsUnknownImplementation(t *testing.T) {
+	cfg := validTestConfig()
+	cfg.Implementation = "unknown-agent"
+
+	err := validateConfig(cfg)
+	if err == nil || !strings.Contains(err.Error(), "implementation must be one of") {
+		t.Fatalf("expected implementation validation error, got %v", err)
+	}
+}
+
+func TestTemplateConfigOpenClaw(t *testing.T) {
+	cfg, err := templateConfig("openclaw")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.Implementation != implementationOpenClaw {
+		t.Fatalf("expected openclaw implementation, got %q", cfg.Implementation)
+	}
+	if cfg.OpenAI.ValueEnv != "OPENAI_API_KEY" {
+		t.Fatalf("expected OpenAI env source, got %q", cfg.OpenAI.ValueEnv)
+	}
+	if !cfg.API.Generate {
+		t.Fatal("expected generated service API key")
+	}
+	if !cfg.Admin.Enabled || !cfg.Admin.Password.Generate {
+		t.Fatal("expected generated admin dashboard password")
+	}
+	if !cfg.ConfigAPI.Enabled || !cfg.ConfigAPI.Secret.Generate {
+		t.Fatal("expected generated config API key for OpenClaw profile")
+	}
+	if err := validateConfig(cfg); err != nil {
+		t.Fatalf("template should validate: %v", err)
+	}
+}
+
+func TestTemplateConfigHermes(t *testing.T) {
+	cfg, err := templateConfig("hermes")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.Implementation != implementationHermes {
+		t.Fatalf("expected hermes implementation, got %q", cfg.Implementation)
+	}
+	if !cfg.Claude.Enabled {
+		t.Fatal("expected Claude to be enabled for Hermes profile")
+	}
+	if cfg.Claude.Secret.ValueEnv != "ANTHROPIC_API_KEY" {
+		t.Fatalf("expected Anthropic env source, got %q", cfg.Claude.Secret.ValueEnv)
+	}
+	if !cfg.ConfigAPI.Enabled || !cfg.ConfigAPI.Secret.Generate {
+		t.Fatal("expected generated config API key for Hermes profile")
+	}
+	if err := validateConfig(cfg); err != nil {
+		t.Fatalf("template should validate: %v", err)
 	}
 }
 
@@ -141,6 +233,7 @@ func TestDryRunCommandPlanningAndRedaction(t *testing.T) {
 		"CONFIG_API_KEY=clotilde-config-test:latest",
 		"PERPLEXITY_KEY_SECRET_NAME=clotilde-perplexity-test:latest",
 		"CLAUDE_KEY_SECRET_NAME=clotilde-claude-test:latest",
+		"OPENROUTER_KEY_SECRET_NAME=clotilde-openrouter-test:latest",
 		"ADMIN_USER=admin",
 	} {
 		if !strings.Contains(deployJoined, expected) {
@@ -149,7 +242,7 @@ func TestDryRunCommandPlanningAndRedaction(t *testing.T) {
 	}
 
 	output := stdout.String()
-	for _, secretValue := range []string{"test-openai-secret", "admin-password", "test-claude-secret", "test-perplexity-secret", "config-key"} {
+	for _, secretValue := range []string{"test-openai-secret", "admin-password", "test-claude-secret", "test-openrouter-secret", "test-perplexity-secret", "config-key"} {
 		if strings.Contains(output, secretValue) {
 			t.Fatalf("stdout leaked secret value %q", secretValue)
 		}
@@ -159,6 +252,7 @@ func TestDryRunCommandPlanningAndRedaction(t *testing.T) {
 func TestDryRunCLIProducesJSON(t *testing.T) {
 	cfg := validTestConfig()
 	cfg.Claude = ProviderConfig{}
+	cfg.OpenRouter = ProviderConfig{}
 	cfg.Perplexity = ProviderConfig{}
 	cfg.ConfigAPI = ProviderConfig{}
 
@@ -193,6 +287,28 @@ func TestDryRunCLIProducesJSON(t *testing.T) {
 	}
 	if len(result.Commands) == 0 {
 		t.Fatal("expected command list in dry-run output")
+	}
+}
+
+func TestCLIPrintsHermesTemplateJSON(t *testing.T) {
+	cmd := exec.Command("go", "run", ".", "--template", "hermes", "--output", "json")
+	cmd.Dir = "."
+	var cmdStderr bytes.Buffer
+	cmd.Stderr = &cmdStderr
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("go run template failed: %v\nstdout:\n%s\nstderr:\n%s", err, string(output), cmdStderr.String())
+	}
+
+	var cfg SetupConfig
+	if err := json.Unmarshal(output, &cfg); err != nil {
+		t.Fatalf("expected JSON config template, got error %v\n%s", err, string(output))
+	}
+	if cfg.Implementation != implementationHermes {
+		t.Fatalf("expected hermes implementation, got %q", cfg.Implementation)
+	}
+	if !cfg.Claude.Enabled || cfg.Claude.Secret.ValueEnv != "ANTHROPIC_API_KEY" {
+		t.Fatalf("expected Hermes template to enable Claude from ANTHROPIC_API_KEY: %+v", cfg.Claude)
 	}
 }
 

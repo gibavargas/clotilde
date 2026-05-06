@@ -9,7 +9,7 @@ Clotilde CarPlay Assistant implements multiple layers of security to protect use
 ### Assets to Protect
 
 1. **User Prompts**: Voice input from CarPlay users
-2. **API Keys**: OpenAI API key and service authentication key
+2. **API Keys**: upstream provider keys (Claude, OpenRouter, OpenAI, Perplexity) and service authentication key
 3. **Service Availability**: Protection against DDoS and abuse
 4. **User Privacy**: Full prompts and responses are logged for admin/audit visibility, so access control and retention policy matter
 
@@ -158,7 +158,10 @@ All category-specific prompts include a "SEGURANÇA E COMPORTAMENTO" section tha
 **Implementation**: Google Secret Manager
 
 - **Secrets Stored** (use unique names for each deployment):
-  - OpenAI API key secret (configurable name)
+  - Anthropic Claude API key secret (recommended primary provider)
+  - OpenRouter API key secret (optional provider/fallback)
+  - OpenAI API key secret (optional Responses fallback)
+  - Perplexity API key secret (optional search provider)
   - Service authentication key secret (configurable name)
 - **Security**: Use unique, unpredictable secret names to prevent enumeration attacks
 - **Access**: Cloud Run service account with least privilege
@@ -198,18 +201,27 @@ roles/secretmanager.secretAccessor
 
 ### 8. Logging and Data Retention
 
-**Implementation**: Full content logging for debugging and monitoring
+**Implementation**: Metadata-only logging by default, with explicit opt-in for full content
 
 **IMPORTANT - Full Content Logging**:
-This service logs the **complete content** of all user prompts and AI responses. This includes:
-- **Full user input**: Every character of user prompts/questions is logged
-- **Full AI responses**: Every character of AI-generated responses is logged
+By default, this service does **not** log complete user prompts or AI responses. Full content logging is enabled only when `LOG_FULL_CONTENT=true` is set.
 
-This means that any Personal Identifiable Information (PII), sensitive data, health information, or private conversations that users share with the assistant will be permanently recorded in Google Cloud Logging (subject to retention policies).
+If full content logging is enabled, any Personal Identifiable Information (PII), sensitive data, health information, or private conversations that users share with the assistant may be recorded in the in-memory log buffer and Google Cloud Logging, subject to retention policies.
 
-**What IS Logged**:
-- **Full user input** (complete prompts/questions) - ALL content is logged
-- **Full AI responses** (complete output) - ALL content is logged
+**What IS Logged by Default**:
+- Request timestamp
+- IP address hash (SHA-256 hash with salt, not actual IP address)
+- Message length
+- Response time
+- Model used
+- Category (routing decision)
+- Status (success/error)
+- Error messages (if any)
+
+**What Is Logged Only With `LOG_FULL_CONTENT=true`**:
+- Full user input
+- Sanitized user input
+- Full AI responses
 - Request timestamp
 - IP address hash (SHA-256 hash with salt, not actual IP address)
 - Message length
@@ -241,7 +253,7 @@ This means that any Personal Identifiable Information (PII), sensitive data, hea
    - Protected by HTTP Basic Authentication
    - Requires admin username and password (set via `ADMIN_USER` and `ADMIN_PASSWORD` environment variables)
    - Only authenticated admin users can view logs
-   - Logs displayed in detail view with full raw question/output content
+   - Logs display full raw question/output content only when `LOG_FULL_CONTENT=true`
 2. **Google Cloud Logging**:
    - Requires IAM permissions to access:
      - `roles/logging.viewer` - View logs in Cloud Logging console
@@ -250,7 +262,7 @@ This means that any Personal Identifiable Information (PII), sensitive data, hea
    - Access is audited via Cloud Audit Logs
 
 **Compliance Considerations**:
-- **Full content logging is enabled**: This service logs complete user prompts and AI responses, which may contain:
+- **Full content logging is opt-in**: If `LOG_FULL_CONTENT=true`, this service logs complete user prompts and AI responses, which may contain:
   - Personal Identifiable Information (PII) such as names, addresses, phone numbers, email addresses
   - Sensitive business information
   - Private conversations and personal details
@@ -267,7 +279,7 @@ This means that any Personal Identifiable Information (PII), sensitive data, hea
   - Consider implementing log export/deletion capabilities for compliance
   - Retention period should align with legal requirements (default: 30 days)
   - Full content logging may require explicit user consent depending on jurisdiction
-- **Privacy Policy**: Ensure your privacy policy clearly states that full conversation content is logged for debugging and monitoring purposes
+- **Privacy Policy**: If full content logging is enabled, ensure your privacy policy clearly states that full conversation content is logged for debugging and monitoring purposes
 
 **Example Log Entry**:
 ```json
@@ -280,15 +292,15 @@ This means that any Personal Identifiable Information (PII), sensitive data, hea
   "category": "web_search",
   "response_time_ms": 1234,
   "status": "success",
-  "input": "What are the latest news about AI?",
-  "output": "Here are the latest developments in AI..."
+  "input": "",
+  "output": ""
 }
 ```
 
 ### 9. Prompt Privacy
 
 **Current Implementation**:
-- Full prompts and responses ARE logged for debugging and monitoring purposes
+- Full prompts and responses are not logged unless `LOG_FULL_CONTENT=true`
 - Logs are stored in-memory (ring buffer) and Google Cloud Logging
 - Access is restricted via authentication and IAM
 
@@ -302,9 +314,9 @@ This means that any Personal Identifiable Information (PII), sensitive data, hea
 **Data Flow**:
 1. User speaks → Apple Shortcut
 2. Shortcut → HTTPS POST to Cloud Run
-3. Cloud Run → OpenAI API (HTTPS)
+3. Cloud Run → configured provider API (Anthropic, OpenRouter, OpenAI, and/or Perplexity) over HTTPS
 4. Response → User via Shortcut
-5. Request/Response logged to in-memory buffer and Cloud Logging
+5. Request/response metadata logged to in-memory buffer and Cloud Logging
 6. Logs accessible via admin dashboard (authenticated) or Cloud Logging (IAM-protected)
 
 ### 10. DDoS Protection
@@ -391,12 +403,12 @@ This means that any Personal Identifiable Information (PII), sensitive data, hea
 
 ## Compliance Notes
 
-- **Full Content Logging**: Service logs complete user prompts and AI responses, which may contain PII
+- **Full Content Logging**: Disabled by default; if enabled with `LOG_FULL_CONTENT=true`, service logs complete user prompts and AI responses, which may contain PII
 - **Data Retention**: Logs are stored in Google Cloud Logging (default 30 days retention)
 - **HTTPS Only**: All traffic encrypted in transit
 - **Encrypted Storage**: Logs are encrypted at rest in Google Cloud Logging
 - **Access Controls**: Logs are protected by authentication and IAM
-- **Privacy Policy Required**: Ensure privacy policy clearly states full content logging
+- **Privacy Policy Required**: Ensure privacy policy clearly states whether full content logging is enabled
 
 ## Security Checklist
 

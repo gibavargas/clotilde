@@ -2,6 +2,8 @@
 
 This document details the security vulnerabilities and bugs discovered during code review, the fixes implemented, and the reasoning behind each fix.
 
+> Current provider setup is documented in [PROVIDERS.md](PROVIDERS.md). Historical OpenAI-only notes below may describe older deployment defaults.
+
 **Review Date**: 2025-01-XX  
 **Reviewer**: AI Code Review Agent  
 **Status**: All critical and medium issues fixed ✅
@@ -2478,4 +2480,3 @@ curl -I https://<service-url>/admin/
 **Last Updated**: 2025-12-23  
 **Status**: Active ✅  
 **Critical**: These preferences MUST be followed for all deployments
-

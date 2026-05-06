@@ -55,12 +55,7 @@ func RedactPII(text string) string {
 }
 
 // ShouldLogFullContent checks if full content logging is enabled
-// If LOG_FULL_CONTENT=false, only metadata should be logged
+// If LOG_FULL_CONTENT=true, raw request and response text may be logged.
 func ShouldLogFullContent() bool {
-	// Default to true (full content logging) for backward compatibility
-	if os.Getenv("LOG_FULL_CONTENT") == "false" {
-		return false
-	}
-	return true
+	return os.Getenv("LOG_FULL_CONTENT") == "true"
 }
-

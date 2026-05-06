@@ -78,7 +78,9 @@ func TestSetConfig_ValidModels(t *testing.T) {
 		{"gpt-4.1 series", "gpt-4.1-mini", "gpt-4.1", true},
 		{"gpt-5 series", "gpt-5-mini", "gpt-5.1", true},
 		{"o-series", "o1-mini", "o3", true},
+		{"openrouter slug", "openrouter/anthropic/claude-haiku-4.5", "openrouter/openai/gpt-5.2", true},
 		{"invalid standard", "invalid-model", "gpt-4o", false},
+		{"invalid openrouter slug", "openrouter/not-enough", "gpt-4o", false},
 		{"invalid premium", "gpt-4o-mini", "invalid-model", false},
 		{"both invalid", "invalid-1", "invalid-2", false},
 	}
@@ -155,7 +157,7 @@ func TestSetConfig_SystemPromptValidation(t *testing.T) {
 				if err == nil {
 					t.Errorf("Expected error, got success")
 				} else if tc.errorContains != "" {
-					if err.Error() == "" || (tc.errorContains != "" && err.Error() != "" && 
+					if err.Error() == "" || (tc.errorContains != "" && err.Error() != "" &&
 						!contains(err.Error(), tc.errorContains)) {
 						t.Errorf("Expected error to contain %q, got %q", tc.errorContains, err.Error())
 					}
@@ -187,7 +189,7 @@ func TestSetConfig_ThreadSafety(t *testing.T) {
 			newConfig := RuntimeConfig{
 				SystemPrompt:  "Concurrent test: %s",
 				StandardModel: "gpt-4o-mini",
-				PremiumModel: "gpt-4o",
+				PremiumModel:  "gpt-4o",
 			}
 			SetConfig(newConfig)
 		}(i)
@@ -248,9 +250,9 @@ func TestValidateSystemPrompt_UTF8(t *testing.T) {
 
 // Helper function
 func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || 
-		(len(s) > len(substr) && (s[:len(substr)] == substr || 
-			s[len(s)-len(substr):] == substr || 
+	return len(s) >= len(substr) && (s == substr ||
+		(len(s) > len(substr) && (s[:len(substr)] == substr ||
+			s[len(s)-len(substr):] == substr ||
 			containsMiddle(s, substr))))
 }
 
@@ -262,4 +264,3 @@ func containsMiddle(s, substr string) bool {
 	}
 	return false
 }
-

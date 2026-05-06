@@ -100,14 +100,21 @@ func provision(ctx context.Context, cfg SetupConfig, runner CommandRunner, stdou
 		}
 	}
 
-	if err := createOrUpdateSecret(ctx, runner, cfg.OpenAI); err != nil {
-		return err
+	if isSecretConfigured(cfg.OpenAI) {
+		if err := createOrUpdateSecret(ctx, runner, cfg.OpenAI); err != nil {
+			return err
+		}
 	}
 	if err := createOrUpdateSecret(ctx, runner, cfg.API); err != nil {
 		return err
 	}
 	if cfg.Claude.Enabled {
 		if err := createOrUpdateSecret(ctx, runner, cfg.Claude.Secret); err != nil {
+			return err
+		}
+	}
+	if cfg.OpenRouter.Enabled {
+		if err := createOrUpdateSecret(ctx, runner, cfg.OpenRouter.Secret); err != nil {
 			return err
 		}
 	}
@@ -261,8 +268,10 @@ func buildEnvVars(cfg SetupConfig, dryRun bool) string {
 
 func buildSecretVars(cfg SetupConfig) string {
 	secrets := []string{
-		"OPENAI_KEY_SECRET_NAME=" + cfg.OpenAI.SecretName + ":latest",
 		"API_KEY_SECRET_NAME=" + cfg.API.SecretName + ":latest",
+	}
+	if isSecretConfigured(cfg.OpenAI) {
+		secrets = append(secrets, "OPENAI_KEY_SECRET_NAME="+cfg.OpenAI.SecretName+":latest")
 	}
 	if cfg.Admin.Enabled {
 		secrets = append(secrets, "ADMIN_PASSWORD="+cfg.Admin.Password.SecretName+":latest")
@@ -275,6 +284,9 @@ func buildSecretVars(cfg SetupConfig) string {
 	}
 	if cfg.Claude.Enabled {
 		secrets = append(secrets, "CLAUDE_KEY_SECRET_NAME="+cfg.Claude.Secret.SecretName+":latest")
+	}
+	if cfg.OpenRouter.Enabled {
+		secrets = append(secrets, "OPENROUTER_KEY_SECRET_NAME="+cfg.OpenRouter.Secret.SecretName+":latest")
 	}
 	return strings.Join(secrets, ",")
 }
@@ -340,6 +352,18 @@ func nextSteps(serviceURL string, cfg SetupConfig) []string {
 	}
 	if cfg.Admin.Enabled {
 		steps = append(steps, "Open the admin dashboard at "+url+"/admin/ and sign in as "+cfg.Admin.Username+".")
+		if cfg.Admin.Password.Generate {
+			steps = append(steps, "Retrieve the generated admin password with: gcloud secrets versions access latest --secret="+cfg.Admin.Password.SecretName)
+		}
+	}
+	if cfg.ConfigAPI.Enabled && cfg.ConfigAPI.Secret.Generate {
+		steps = append(steps, "Retrieve the generated config API key with: gcloud secrets versions access latest --secret="+cfg.ConfigAPI.Secret.SecretName)
+	}
+	switch cfg.Implementation {
+	case implementationOpenClaw:
+		steps = append(steps, "Use .clotilde/setup-result.json as the handoff file for OpenClaw agents that need the service URL and secret inventory.")
+	case implementationHermes:
+		steps = append(steps, "Use .clotilde/setup-result.json as the handoff file for Hermes implementations that need the service URL and secret inventory.")
 	}
 	return steps
 }

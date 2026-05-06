@@ -14,6 +14,12 @@ import (
 
 var secretNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,255}$`)
 
+const (
+	implementationGeneric  = "generic"
+	implementationOpenClaw = "openclaw"
+	implementationHermes   = "hermes"
+)
+
 func loadConfig(path string) (SetupConfig, error) {
 	var cfg SetupConfig
 	if path == "" {
@@ -30,6 +36,7 @@ func loadConfig(path string) (SetupConfig, error) {
 }
 
 func applyDefaults(cfg *SetupConfig) {
+	cfg.Implementation = normalizeImplementation(cfg.Implementation)
 	if cfg.Region == "" {
 		cfg.Region = "us-central1"
 	}
@@ -49,6 +56,10 @@ func applyDefaults(cfg *SetupConfig) {
 
 func validateConfig(cfg SetupConfig) error {
 	var problems []string
+	implementation := normalizeImplementation(cfg.Implementation)
+	if !validImplementation(implementation) {
+		problems = append(problems, "implementation must be one of: generic, openclaw, hermes")
+	}
 	if strings.TrimSpace(cfg.ProjectID) == "" {
 		problems = append(problems, "project_id is required")
 	}
@@ -65,11 +76,17 @@ func validateConfig(cfg SetupConfig) error {
 		problems = append(problems, "log_buffer_size must be non-negative")
 	}
 
-	problems = append(problems, validateSecret("openai", cfg.OpenAI, true)...)
+	if isSecretConfigured(cfg.OpenAI) {
+		problems = append(problems, validateExternalSecret("openai", cfg.OpenAI)...)
+	}
 	problems = append(problems, validateSecret("api", cfg.API, true)...)
-	problems = append(problems, validateProvider("claude", cfg.Claude)...)
-	problems = append(problems, validateProvider("perplexity", cfg.Perplexity)...)
+	problems = append(problems, validateExternalProvider("claude", cfg.Claude)...)
+	problems = append(problems, validateExternalProvider("openrouter", cfg.OpenRouter)...)
+	problems = append(problems, validateExternalProvider("perplexity", cfg.Perplexity)...)
 	problems = append(problems, validateProvider("config_api", cfg.ConfigAPI)...)
+	if !isSecretConfigured(cfg.OpenAI) && !cfg.Claude.Enabled && !cfg.OpenRouter.Enabled {
+		problems = append(problems, "at least one AI provider is required: openai, claude, or openrouter")
+	}
 
 	if cfg.Admin.Enabled {
 		if strings.TrimSpace(cfg.Admin.Username) == "" {
@@ -84,11 +101,60 @@ func validateConfig(cfg SetupConfig) error {
 	return nil
 }
 
+func normalizeImplementation(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "default":
+		return implementationGeneric
+	case "openclaw", "open-claw", "open_claw":
+		return implementationOpenClaw
+	case "hermes", "nemohermes", "nemo-hermes", "nemo_hermes":
+		return implementationHermes
+	default:
+		return strings.ToLower(strings.TrimSpace(value))
+	}
+}
+
+func validImplementation(value string) bool {
+	switch normalizeImplementation(value) {
+	case implementationGeneric, implementationOpenClaw, implementationHermes:
+		return true
+	default:
+		return false
+	}
+}
+
+func hasSecretSource(secret SecretConfig) bool {
+	return secret.UseExistingSecret || secret.Generate || secret.Value != "" || secret.ValueEnv != ""
+}
+
 func validateProvider(name string, provider ProviderConfig) []string {
 	if !provider.Enabled {
 		return nil
 	}
 	return validateSecret(name+".secret", provider.Secret, true)
+}
+
+func validateExternalProvider(name string, provider ProviderConfig) []string {
+	if !provider.Enabled {
+		return nil
+	}
+	return validateExternalSecret(name+".secret", provider.Secret)
+}
+
+func validateExternalSecret(path string, secret SecretConfig) []string {
+	problems := validateSecret(path, secret, true)
+	if secret.Generate {
+		problems = append(problems, path+".generate cannot be used for upstream provider keys")
+	}
+	return problems
+}
+
+func isSecretConfigured(secret SecretConfig) bool {
+	return strings.TrimSpace(secret.SecretName) != "" ||
+		secret.Value != "" ||
+		secret.ValueEnv != "" ||
+		secret.UseExistingSecret ||
+		secret.Generate
 }
 
 func validateSecret(path string, secret SecretConfig, requireValueSource bool) []string {
@@ -135,11 +201,16 @@ func randomHex(bytesLen int) (string, error) {
 
 func secretInventory(cfg SetupConfig) map[string]string {
 	secrets := map[string]string{
-		"openai": cfg.OpenAI.SecretName,
-		"api":    cfg.API.SecretName,
+		"api": cfg.API.SecretName,
+	}
+	if isSecretConfigured(cfg.OpenAI) {
+		secrets["openai"] = cfg.OpenAI.SecretName
 	}
 	if cfg.Claude.Enabled {
 		secrets["claude"] = cfg.Claude.Secret.SecretName
+	}
+	if cfg.OpenRouter.Enabled {
+		secrets["openrouter"] = cfg.OpenRouter.Secret.SecretName
 	}
 	if cfg.Perplexity.Enabled {
 		secrets["perplexity"] = cfg.Perplexity.Secret.SecretName
@@ -154,7 +225,10 @@ func secretInventory(cfg SetupConfig) map[string]string {
 }
 
 func orderedSecretNames(cfg SetupConfig) []string {
-	secrets := []string{cfg.OpenAI.SecretName, cfg.API.SecretName}
+	secrets := []string{cfg.API.SecretName}
+	if isSecretConfigured(cfg.OpenAI) {
+		secrets = append(secrets, cfg.OpenAI.SecretName)
+	}
 	if cfg.Admin.Enabled {
 		secrets = append(secrets, cfg.Admin.Password.SecretName)
 	}
@@ -166,6 +240,9 @@ func orderedSecretNames(cfg SetupConfig) []string {
 	}
 	if cfg.Claude.Enabled {
 		secrets = append(secrets, cfg.Claude.Secret.SecretName)
+	}
+	if cfg.OpenRouter.Enabled {
+		secrets = append(secrets, cfg.OpenRouter.Secret.SecretName)
 	}
 	return secrets
 }

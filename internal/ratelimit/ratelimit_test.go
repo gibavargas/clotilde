@@ -126,8 +126,8 @@ func TestGetClientIP_XForwardedFor_IPv6(t *testing.T) {
 	req.RemoteAddr = "127.0.0.1:12345"
 
 	ip := getClientIP(req)
-	if ip != "[2001:db8::1]" {
-		t.Errorf("Expected [2001:db8::1] (IPv6 with brackets), got %s", ip)
+	if ip != "2001:db8::1" {
+		t.Errorf("Expected 2001:db8::1 (normalized IPv6), got %s", ip)
 	}
 }
 
@@ -137,8 +137,8 @@ func TestGetClientIP_XForwardedFor_IPv6_Multiple(t *testing.T) {
 	req.RemoteAddr = "127.0.0.1:12345"
 
 	ip := getClientIP(req)
-	if ip != "[2001:db8::2]" {
-		t.Errorf("Expected [2001:db8::2] (rightmost IPv6, added by Cloud Run), got %s", ip)
+	if ip != "2001:db8::2" {
+		t.Errorf("Expected 2001:db8::2 (rightmost normalized IPv6, added by Cloud Run), got %s", ip)
 	}
 }
 
@@ -207,8 +207,8 @@ func TestGetClientIP_RemoteAddr_IPv6(t *testing.T) {
 	req.RemoteAddr = "[2001:db8::2]:12345"
 
 	ip := getClientIP(req)
-	if ip != "[2001:db8::2]" {
-		t.Errorf("Expected [2001:db8::2], got %s", ip)
+	if ip != "2001:db8::2" {
+		t.Errorf("Expected 2001:db8::2, got %s", ip)
 	}
 }
 
@@ -221,11 +221,11 @@ func TestGetClientIP_XForwardedFor_SpoofingPrevention(t *testing.T) {
 
 	// Simulate attacker sending unique IPs to bypass rate limit
 	uniqueIPs := []string{"1.1.1.1", "2.2.2.2", "3.3.3.3", "4.4.4.4", "5.5.5.5"}
-	
+
 	// All requests should be rate limited by the same key (API key)
 	// because we use API key, not IP, for rate limiting
 	apiKey := "test-key-spoofing"
-	
+
 	for i, spoofedIP := range uniqueIPs {
 		req := httptest.NewRequest("POST", "/chat", nil)
 		req.Header.Set("X-API-Key", apiKey)
@@ -363,4 +363,3 @@ func TestGetClientIP_XForwardedFor_EmptyString(t *testing.T) {
 		t.Errorf("Expected fallback to RemoteAddr, got %s", ip)
 	}
 }
-

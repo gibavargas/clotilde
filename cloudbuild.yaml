@@ -1,15 +1,8 @@
-# DEPRECATED: This Cloud Build configuration is kept for reference only.
-# The recommended deployment method is to use the local deploy.sh script.
-# See README.md for the current deployment instructions.
+# Build and deploy Clotilde with Google Cloud Build.
 #
-# To use this file (not recommended):
+# To use this file:
 #   gcloud builds submit --config=cloudbuild.yaml \
-#     --substitutions=_OPENAI_SECRET=<secret-name>,_API_SECRET=<secret-name>
-#
-# Recommended method:
-#   export OPENAI_SECRET=<secret-name>
-#   export API_SECRET=<secret-name>
-#   ./deploy.sh
+#     --substitutions=_CLAUDE_SECRET=<secret-name>,_API_SECRET=<secret-name>,_ADMIN_USER=admin,_ADMIN_SECRET=<secret-name>
 
 steps:
   # Build the Docker image
@@ -38,9 +31,14 @@ steps:
       - |
         ENV_VARS="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},LOG_BUFFER_SIZE=${_LOG_BUFFER_SIZE}"
         [ -n "${_ADMIN_USER}" ] && ENV_VARS="$${ENV_VARS},ADMIN_USER=${_ADMIN_USER}"
+        [ -n "${_IP_HASH_SALT}" ] && ENV_VARS="$${ENV_VARS},IP_HASH_SALT=${_IP_HASH_SALT}"
         
-        SECRETS="OPENAI_KEY_SECRET_NAME=${_OPENAI_SECRET}:latest,API_KEY_SECRET_NAME=${_API_SECRET}:latest"
+        SECRETS="API_KEY_SECRET_NAME=${_API_SECRET}:latest"
+        [ -n "${_OPENAI_SECRET}" ] && SECRETS="$${SECRETS},OPENAI_KEY_SECRET_NAME=${_OPENAI_SECRET}:latest"
         [ -n "${_ADMIN_SECRET}" ] && SECRETS="$${SECRETS},ADMIN_PASSWORD=${_ADMIN_SECRET}:latest"
+        [ -n "${_CLAUDE_SECRET}" ] && SECRETS="$${SECRETS},CLAUDE_KEY_SECRET_NAME=${_CLAUDE_SECRET}:latest"
+        [ -n "${_OPENROUTER_SECRET}" ] && SECRETS="$${SECRETS},OPENROUTER_KEY_SECRET_NAME=${_OPENROUTER_SECRET}:latest"
+        [ -n "${_PERPLEXITY_SECRET}" ] && SECRETS="$${SECRETS},PERPLEXITY_SECRET_NAME=${_PERPLEXITY_SECRET}:latest"
         
         gcloud run deploy ${_SERVICE_NAME} \
           --image ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/${_SERVICE_NAME}:latest \
@@ -65,11 +63,14 @@ substitutions:
   _REGION: 'us-central1'
   _REPO_NAME: 'clotilde-repo'
   _SERVICE_NAME: 'clotilde'
-  _OPENAI_SECRET: 'your-openai-secret-name'  # Override with --substitutions=_OPENAI_SECRET=actual-name
+  _OPENAI_SECRET: ''                         # Optional: OpenAI API key secret name
   _API_SECRET: 'your-api-secret-name'        # Override with --substitutions=_API_SECRET=actual-name
   _ADMIN_SECRET: ''                          # Optional: admin password secret name for dashboard
   _ADMIN_USER: ''                            # Optional: admin username for dashboard
+  _CLAUDE_SECRET: ''                         # Recommended: Claude API key secret name
+  _OPENROUTER_SECRET: ''                     # Optional: OpenRouter API key secret name
+  _PERPLEXITY_SECRET: ''                     # Optional: Perplexity API key secret name
   _LOG_BUFFER_SIZE: '1000'                   # Optional: max log entries in memory
+  _IP_HASH_SALT: ''                          # Optional: stable IP hash salt
 
 timeout: '1200s'
-
