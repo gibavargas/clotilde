@@ -25,18 +25,19 @@ const (
 
 func runSetup(ctx context.Context, cfg SetupConfig, opts Options, runner CommandRunner, stdin io.Reader, stdout, stderr io.Writer) (SetupResult, int) {
 	startedAt := time.Now()
+	applyDefaults(&cfg)
 	result := SetupResult{
-		OK:           false,
-		Secrets:      map[string]string{},
-		AdminEnabled: cfg.Admin.Enabled,
-		StartedAt:    startedAt,
+		OK:             false,
+		Implementation: cfg.Implementation,
+		Secrets:        map[string]string{},
+		AdminEnabled:   cfg.Admin.Enabled,
+		StartedAt:      startedAt,
 	}
 	progressOut := stdout
 	if opts.Output == "json" {
 		progressOut = stderr
 	}
 
-	applyDefaults(&cfg)
 	if opts.ResultPath == "" {
 		opts.ResultPath = filepath.Join(".clotilde", "setup-result.json")
 	}
@@ -56,6 +57,7 @@ func runSetup(ctx context.Context, cfg SetupConfig, opts Options, runner Command
 		}
 	}
 	applyDefaults(&cfg)
+	result.Implementation = cfg.Implementation
 	result.AdminEnabled = cfg.Admin.Enabled
 
 	if err := validateConfig(cfg); err != nil {
@@ -122,59 +124,117 @@ func failResult(result SetupResult, err error, code int) (SetupResult, int) {
 
 func collectInteractiveConfig(ctx context.Context, cfg SetupConfig, runner CommandRunner, stdin io.Reader, stdout io.Writer) (SetupConfig, error) {
 	reader := bufio.NewReader(stdin)
+	var stdinFile *os.File
+	if file, ok := stdin.(*os.File); ok {
+		stdinFile = file
+	}
+
+	fmt.Fprintln(stdout, "Clotilde setup wizard")
+	fmt.Fprintln(stdout, "Press Enter to accept defaults. Secret values are never written to the setup result.")
+	cfg.Implementation = promptChoice(reader, stdout, "Implementation profile (generic/openclaw/hermes)", cfg.Implementation, []string{implementationGeneric, implementationOpenClaw, implementationHermes})
+	quick := confirm(reader, stdout, "Use quick Cloud Run defaults?", true)
+
 	active, _ := activeProject(ctx, runner)
 	active = strings.TrimSpace(active)
 	if cfg.ProjectID == "" {
 		cfg.ProjectID = prompt(reader, stdout, "Google Cloud project ID", active)
 	}
 	cfg.Region = prompt(reader, stdout, "Region", valueOrDefault(cfg.Region, "us-central1"))
-	cfg.ServiceName = prompt(reader, stdout, "Cloud Run service name", valueOrDefault(cfg.ServiceName, "clotilde"))
-	cfg.RepoName = prompt(reader, stdout, "Artifact Registry repo name", valueOrDefault(cfg.RepoName, "clotilde-repo"))
-	cfg.ImageTag = prompt(reader, stdout, "Image tag", valueOrDefault(cfg.ImageTag, defaultImageTag))
-	cfg.LogBufferSize = promptInt(reader, stdout, "Log buffer size", valueOrDefault(strconv.Itoa(cfg.LogBufferSize), "1000"))
-
-	if cfg.OpenAI.SecretName == "" {
-		cfg.OpenAI.SecretName = prompt(reader, stdout, "OpenAI secret name", defaultSecretName("clotilde-oai"))
-	}
-	cfg.OpenAI.Value = promptSecret(stdout, "OpenAI API key")
-
-	if cfg.API.SecretName == "" {
-		cfg.API.SecretName = prompt(reader, stdout, "Service API key secret name", defaultSecretName("clotilde-auth"))
-	}
-	if confirm(reader, stdout, "Generate service API key automatically?", true) {
-		cfg.API.Generate = true
+	if quick {
+		fmt.Fprintf(stdout, "Using service %q, repo %q, image tag %q, and log buffer %d.\n", cfg.ServiceName, cfg.RepoName, cfg.ImageTag, cfg.LogBufferSize)
 	} else {
-		cfg.API.Value = promptSecret(stdout, "Service API key")
+		cfg.ServiceName = prompt(reader, stdout, "Cloud Run service name", valueOrDefault(cfg.ServiceName, "clotilde"))
+		cfg.RepoName = prompt(reader, stdout, "Artifact Registry repo name", valueOrDefault(cfg.RepoName, "clotilde-repo"))
+		cfg.ImageTag = prompt(reader, stdout, "Image tag", valueOrDefault(cfg.ImageTag, defaultImageTag))
+		cfg.LogBufferSize = promptInt(reader, stdout, "Log buffer size", valueOrDefault(strconv.Itoa(cfg.LogBufferSize), "1000"))
 	}
 
-	cfg.Admin.Enabled = confirm(reader, stdout, "Enable admin dashboard?", true)
+	cfg.OpenAI = collectSecretSource(reader, stdinFile, stdout, cfg.OpenAI, "OpenAI API key", defaultSecretName("clotilde-oai"), []string{"OPENAI_API_KEY", "OPENAI_KEY_SECRET_NAME"}, false, false)
+	cfg.API = collectSecretSource(reader, stdinFile, stdout, cfg.API, "Service API key", defaultSecretName("clotilde-auth"), []string{"CLOTILDE_API_KEY", "API_KEY_SECRET_NAME"}, true, true)
+
+	cfg.Admin.Enabled = confirm(reader, stdout, "Enable admin dashboard?", cfg.Admin.Enabled || quick)
 	if cfg.Admin.Enabled {
 		cfg.Admin.Username = prompt(reader, stdout, "Admin username", valueOrDefault(cfg.Admin.Username, "admin"))
-		if cfg.Admin.Password.SecretName == "" {
-			cfg.Admin.Password.SecretName = prompt(reader, stdout, "Admin password secret name", defaultSecretName("clotilde-admin"))
-		}
-		cfg.Admin.Password.Value = promptSecret(stdout, "Admin password")
+		cfg.Admin.Password = collectSecretSource(reader, stdinFile, stdout, cfg.Admin.Password, "Admin password", defaultSecretName("clotilde-admin"), []string{"CLOTILDE_ADMIN_PASSWORD", "ADMIN_PASSWORD"}, true, true)
 	}
 
-	cfg.Claude.Enabled = confirm(reader, stdout, "Enable Claude fast responses?", false)
+	cfg.Claude.Enabled = confirm(reader, stdout, "Enable Claude fast responses?", cfg.Claude.Enabled || cfg.Implementation == implementationHermes)
 	if cfg.Claude.Enabled {
-		cfg.Claude.Secret.SecretName = prompt(reader, stdout, "Claude secret name", defaultSecretName("clotilde-claude"))
-		cfg.Claude.Secret.Value = promptSecret(stdout, "Claude API key")
+		cfg.Claude.Secret = collectSecretSource(reader, stdinFile, stdout, cfg.Claude.Secret, "Claude API key", defaultSecretName("clotilde-claude"), []string{"ANTHROPIC_API_KEY", "CLAUDE_API_KEY", "CLAUDE_KEY_SECRET_NAME"}, false, false)
 	}
 
-	cfg.Perplexity.Enabled = confirm(reader, stdout, "Enable Perplexity search?", false)
+	cfg.Perplexity.Enabled = confirm(reader, stdout, "Enable Perplexity search?", cfg.Perplexity.Enabled)
 	if cfg.Perplexity.Enabled {
-		cfg.Perplexity.Secret.SecretName = prompt(reader, stdout, "Perplexity secret name", defaultSecretName("clotilde-perplexity"))
-		cfg.Perplexity.Secret.Value = promptSecret(stdout, "Perplexity API key")
+		cfg.Perplexity.Secret = collectSecretSource(reader, stdinFile, stdout, cfg.Perplexity.Secret, "Perplexity API key", defaultSecretName("clotilde-perplexity"), []string{"PERPLEXITY_API_KEY", "PERPLEXITY_KEY_SECRET_NAME"}, false, false)
 	}
 
-	cfg.ConfigAPI.Enabled = confirm(reader, stdout, "Enable dedicated config API key?", false)
+	cfg.ConfigAPI.Enabled = confirm(reader, stdout, "Enable dedicated config API key?", cfg.ConfigAPI.Enabled || cfg.Implementation == implementationOpenClaw || cfg.Implementation == implementationHermes)
 	if cfg.ConfigAPI.Enabled {
-		cfg.ConfigAPI.Secret.SecretName = prompt(reader, stdout, "Config API secret name", defaultSecretName("clotilde-config"))
-		cfg.ConfigAPI.Secret.Value = promptSecret(stdout, "Config API key")
+		cfg.ConfigAPI.Secret = collectSecretSource(reader, stdinFile, stdout, cfg.ConfigAPI.Secret, "Config API key", defaultSecretName("clotilde-config"), []string{"CLOTILDE_CONFIG_API_KEY", "CONFIG_API_KEY"}, true, true)
 	}
 
 	return cfg, nil
+}
+
+func promptChoice(reader *bufio.Reader, stdout io.Writer, label, defaultValue string, allowed []string) string {
+	allowedSet := map[string]bool{}
+	for _, value := range allowed {
+		allowedSet[value] = true
+	}
+	for {
+		value := normalizeImplementation(prompt(reader, stdout, label, defaultValue))
+		if allowedSet[value] {
+			return value
+		}
+		fmt.Fprintf(stdout, "Choose one of: %s\n", strings.Join(allowed, ", "))
+	}
+}
+
+func collectSecretSource(reader *bufio.Reader, stdinFile *os.File, stdout io.Writer, secret SecretConfig, label, defaultSecret string, envCandidates []string, allowGenerate, defaultGenerate bool) SecretConfig {
+	if secret.SecretName == "" {
+		secret.SecretName = prompt(reader, stdout, label+" secret name", defaultSecret)
+	}
+	if hasSecretSource(secret) {
+		return secret
+	}
+
+	if allowGenerate && confirm(reader, stdout, "Generate "+strings.ToLower(label)+" automatically?", defaultGenerate) {
+		secret.Generate = true
+		return secret
+	}
+
+	if envName := firstSetEnv(envCandidates); envName != "" {
+		if confirm(reader, stdout, "Use "+envName+" from your environment for "+label+"?", true) {
+			secret.ValueEnv = envName
+			return secret
+		}
+	}
+
+	if confirm(reader, stdout, "Use an existing Secret Manager secret for "+label+"?", false) {
+		secret.UseExistingSecret = true
+		return secret
+	}
+
+	for {
+		secret.Value = promptSecret(reader, stdinFile, stdout, label)
+		if strings.TrimSpace(secret.Value) != "" {
+			return secret
+		}
+		fmt.Fprintf(stdout, "%s is required unless you use an existing Secret Manager secret.\n", label)
+		if confirm(reader, stdout, "Use an existing Secret Manager secret for "+label+"?", false) {
+			secret.UseExistingSecret = true
+			return secret
+		}
+	}
+}
+
+func firstSetEnv(names []string) string {
+	for _, name := range names {
+		if os.Getenv(name) != "" {
+			return name
+		}
+	}
+	return ""
 }
 
 func prompt(reader *bufio.Reader, stdout io.Writer, label, defaultValue string) string {
@@ -218,19 +278,17 @@ func confirm(stdin io.Reader, stdout io.Writer, label string, defaultValue bool)
 	return value == "y" || value == "yes"
 }
 
-func promptSecret(stdout io.Writer, label string) string {
+func promptSecret(reader *bufio.Reader, stdinFile *os.File, stdout io.Writer, label string) string {
 	fmt.Fprintf(stdout, "%s: ", label)
-	if isCharDevice(os.Stdin) {
-		if oldState, err := stty("-g"); err == nil {
-			_ = sttyNoOutput("-echo")
-			reader := bufio.NewReader(os.Stdin)
+	if stdinFile != nil && isCharDevice(stdinFile) {
+		if oldState, err := stty(stdinFile, "-g"); err == nil {
+			_ = sttyNoOutput(stdinFile, "-echo")
 			value, _ := reader.ReadString('\n')
-			_ = sttyNoOutput(oldState)
+			_ = sttyNoOutput(stdinFile, oldState)
 			fmt.Fprintln(stdout)
 			return strings.TrimSpace(value)
 		}
 	}
-	reader := bufio.NewReader(os.Stdin)
 	value, _ := reader.ReadString('\n')
 	return strings.TrimSpace(value)
 }
@@ -240,16 +298,16 @@ func isCharDevice(file *os.File) bool {
 	return err == nil && (info.Mode()&os.ModeCharDevice) != 0
 }
 
-func stty(arg string) (string, error) {
+func stty(stdin *os.File, arg string) (string, error) {
 	cmd := exec.Command("stty", arg)
-	cmd.Stdin = os.Stdin
+	cmd.Stdin = stdin
 	output, err := cmd.Output()
 	return strings.TrimSpace(string(output)), err
 }
 
-func sttyNoOutput(arg string) error {
+func sttyNoOutput(stdin *os.File, arg string) error {
 	cmd := exec.Command("stty", arg)
-	cmd.Stdin = os.Stdin
+	cmd.Stdin = stdin
 	return cmd.Run()
 }
 
@@ -260,7 +318,7 @@ func valueOrDefault(value, fallback string) string {
 	return value
 }
 
-func printJSON(stdout io.Writer, result SetupResult) {
+func printJSON(stdout io.Writer, result any) {
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(result)

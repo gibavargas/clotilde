@@ -26,6 +26,13 @@ The wizard will:
 
 ### 2. Non-Interactive Agent Setup
 
+For OpenClaw or Hermes, start with a profile-specific template:
+
+```bash
+go run ./cmd/clotilde-setup --template openclaw > setup.openclaw.json
+go run ./cmd/clotilde-setup --template hermes > setup.hermes.json
+```
+
 ```bash
 go run ./cmd/clotilde-setup \
   --non-interactive \
@@ -44,6 +51,8 @@ go run ./cmd/clotilde-setup \
   --yes \
   --dry-run
 ```
+
+See [OpenClaw and Hermes setup](OPENCLAW_HERMES_SETUP.md) for the profile-specific handoff file and secret behavior.
 
 ### 3. Get Your Service URL
 

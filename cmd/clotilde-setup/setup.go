@@ -340,6 +340,18 @@ func nextSteps(serviceURL string, cfg SetupConfig) []string {
 	}
 	if cfg.Admin.Enabled {
 		steps = append(steps, "Open the admin dashboard at "+url+"/admin/ and sign in as "+cfg.Admin.Username+".")
+		if cfg.Admin.Password.Generate {
+			steps = append(steps, "Retrieve the generated admin password with: gcloud secrets versions access latest --secret="+cfg.Admin.Password.SecretName)
+		}
+	}
+	if cfg.ConfigAPI.Enabled && cfg.ConfigAPI.Secret.Generate {
+		steps = append(steps, "Retrieve the generated config API key with: gcloud secrets versions access latest --secret="+cfg.ConfigAPI.Secret.SecretName)
+	}
+	switch cfg.Implementation {
+	case implementationOpenClaw:
+		steps = append(steps, "Use .clotilde/setup-result.json as the handoff file for OpenClaw agents that need the service URL and secret inventory.")
+	case implementationHermes:
+		steps = append(steps, "Use .clotilde/setup-result.json as the handoff file for Hermes implementations that need the service URL and secret inventory.")
 	}
 	return steps
 }
