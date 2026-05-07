@@ -1515,7 +1515,7 @@ Before deploying, ensure you have:
 
 1. **Google Cloud Project** configured
 2. **Secret Manager secrets** created:
-   - OpenAI API key secret (name stored in `OPENAI_SECRET` environment variable)
+   - At least one provider API key secret: `CLAUDE_SECRET` (recommended), `OPENROUTER_SECRET`, or `OPENAI_SECRET`
    - API authentication key secret (name stored in `API_SECRET` environment variable)
    - Admin password secret (optional, name stored in `ADMIN_SECRET` environment variable)
 3. **Artifact Registry** repository created (default: `clotilde-repo`)
@@ -1569,12 +1569,12 @@ curl -I https://<service-url>/admin/
 **Command**:
 ```bash
 # Get your secret names first
-OPENAI_SECRET=$(gcloud secrets list --format="value(name)" | grep -iE "openai|oai" | head -1)
+CLAUDE_SECRET=$(gcloud secrets list --format="value(name)" | grep -iE "claude|anthropic" | head -1)
 API_SECRET=$(gcloud secrets list --format="value(name)" | grep -E "clotilde-api-key|api-key" | head -1)
 ADMIN_SECRET=$(gcloud secrets list --format="value(name)" | grep -i admin | head -1)
 
 # Set environment variables
-export OPENAI_SECRET=$OPENAI_SECRET
+export CLAUDE_SECRET=$CLAUDE_SECRET
 export API_SECRET=$API_SECRET
 export ADMIN_SECRET=$ADMIN_SECRET
 export ADMIN_USER=admin
@@ -1591,10 +1591,10 @@ chmod +x deploy.sh
 - Builds Docker image from current directory
 - Pushes to Artifact Registry
 - Deploys to Cloud Run with:
-  - `OPENAI_KEY_SECRET_NAME` environment variable (from `_OPENAI_SECRET`)
-  - `API_KEY_SECRET_NAME` environment variable (from `_API_SECRET`)
-  - `ADMIN_USER` environment variable (from `_ADMIN_USER`)
-  - `ADMIN_PASSWORD` secret mounted (from `_ADMIN_SECRET`)
+  - `CLAUDE_KEY_SECRET_NAME` secret mount (from `CLAUDE_SECRET`)
+  - `API_KEY_SECRET_NAME` secret mount (from `API_SECRET`)
+  - `ADMIN_USER` environment variable
+  - `ADMIN_PASSWORD` secret mount (from `ADMIN_SECRET`)
   - Admin dashboard **enabled** at `/admin/`
 
 **Verification**:
@@ -1637,7 +1637,7 @@ gcloud run services describe clotilde --region=us-central1 \
 **Command**:
 ```bash
 # Set required environment variables (no admin variables)
-export OPENAI_SECRET=<openai-secret-name>
+export CLAUDE_SECRET=<claude-secret-name>
 export API_SECRET=<api-secret-name>
 
 # Deploy without admin dashboard
@@ -1655,7 +1655,7 @@ chmod +x deploy.sh
 ```bash
 # Verify admin is disabled (should return 503 with helpful error page)
 curl -I https://<service-url>/admin/
-# Expected: HTTP/2 404
+# Expected: HTTP/2 503
 ```
 
 ---
@@ -1665,8 +1665,8 @@ curl -I https://<service-url>/admin/
 The `deploy.sh` script uses environment variables that **must** be provided at deploy time:
 
 **Required Environment Variables**:
-- `OPENAI_SECRET`: Name of Secret Manager secret containing OpenAI API key
 - `API_SECRET`: Name of Secret Manager secret containing API authentication key
+- At least one provider secret: `CLAUDE_SECRET` (recommended), `OPENROUTER_SECRET`, or `OPENAI_SECRET`
 
 **Required Environment Variables** (for standard deployment):
 - `ADMIN_SECRET`: Name of Secret Manager secret containing admin password (required for admin UI)

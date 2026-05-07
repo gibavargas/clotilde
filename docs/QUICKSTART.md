@@ -3,7 +3,7 @@
 ## Prerequisites Checklist
 
 - [ ] Google Cloud CLI (gcloud) installed and authenticated
-- [ ] Go 1.21+ installed (for local testing)
+- [ ] Go 1.21+ installed (for the setup wizard and local testing)
 - [ ] Docker installed (for building images)
 - [ ] Anthropic Claude API key, OpenRouter API key, or OpenAI API key
 - [ ] Google Cloud project with billing enabled (for Cloud Run)
@@ -24,7 +24,7 @@ The wizard will:
 - Verify `/health` and `/admin/`
 - Write a sanitized deployment summary to `.clotilde/setup-result.json`
 
-The same wizard can enable Claude Haiku direct API, OpenRouter, OpenAI Responses fallback, Perplexity search, a dedicated config API key, and the admin dashboard through the corresponding sections in `setup.json`.
+The same wizard can enable Claude Haiku direct API, OpenRouter, OpenAI Responses fallback, Perplexity search, an optional `config_api` handoff secret for agent workflows, and the admin dashboard through the corresponding sections in `setup.json`.
 
 ### 2. Non-Interactive Agent Setup
 
@@ -65,7 +65,9 @@ Follow the instructions in [SHORTCUT_SETUP.md](SHORTCUT_SETUP.md) to create the 
 
 ### Manual / Advanced Scripts
 
-`setup-gcloud.sh` and `deploy.sh` remain supported for manual deployments. In `deploy.sh`, `API_SECRET` is required and at least one upstream provider secret must be set: `CLAUDE_SECRET`, `OPENROUTER_SECRET`, or `OPENAI_SECRET`. Inside Cloud Run, these mount as `API_KEY_SECRET_NAME`, `CLAUDE_KEY_SECRET_NAME`, `OPENROUTER_KEY_SECRET_NAME`, and `OPENAI_KEY_SECRET_NAME`. Optional `PERPLEXITY_SECRET` and `CONFIG_API_KEY` can also be used when you enable those features.
+`setup-gcloud.sh` and `deploy.sh` remain supported for manual deployments. In `deploy.sh`, `API_SECRET` is required and at least one upstream provider secret must be set: `CLAUDE_SECRET`, `OPENROUTER_SECRET`, or `OPENAI_SECRET`.
+
+Inside Cloud Run, these mount as `API_KEY_SECRET_NAME`, `CLAUDE_KEY_SECRET_NAME`, `OPENROUTER_KEY_SECRET_NAME`, and `OPENAI_KEY_SECRET_NAME`. Optional Perplexity search is configured with `PERPLEXITY_SECRET_NAME`. The `config_api` handoff secret is available through the setup wizard, not the manual `deploy.sh` path.
 
 ## Testing
 
@@ -83,7 +85,7 @@ curl -X POST $SERVICE_URL/chat \
 
 ## Next Steps
 
-- Read [README.md](README.md) for detailed documentation
+- Read [README.md](../README.md) for detailed documentation
 - Review [PROVIDERS.md](PROVIDERS.md) for Claude/OpenRouter/OpenAI setup choices
 - Review [SECURITY.md](SECURITY.md) for security best practices
 - Configure monitoring alerts in Google Cloud Console
@@ -103,7 +105,7 @@ curl -X POST $SERVICE_URL/api/config \
   }'
 ```
 
-See [Runtime Configuration](#runtime-configuration-no-redeployment-needed) in README.md for full details.
+See [Runtime Configuration](../README.md#runtime-configuration-no-redeployment-needed) in README.md for full details.
 
 ## Troubleshooting
 

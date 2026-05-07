@@ -5,8 +5,10 @@ This project ships a small Go setup wizard for agent-driven deployments. It can 
 The profile names are:
 
 - `generic`: plain Clotilde deployment centered on Claude Haiku.
-- `openclaw`: enables OpenAI fallback plus a generated config API key and writes a handoff result for OpenClaw agents.
-- `hermes`: enables Claude/Anthropic support by default, enables a generated config API key, and writes the same handoff result for Hermes implementations.
+- `openclaw`: enables OpenAI fallback plus a generated `config_api` handoff secret and writes a handoff result for OpenClaw agents.
+- `hermes`: enables Claude/Anthropic support by default, enables a generated `config_api` handoff secret, and writes the same handoff result for Hermes implementations.
+
+The runtime `/api/config` endpoint still uses the main service `X-API-Key`. The `config_api` secret is included in the setup result for agent workflows that need a separate generated value in their own handoff contract.
 
 ## Interactive Wizard
 
@@ -63,6 +65,7 @@ Successful setup writes `.clotilde/setup-result.json`. The file includes:
 - `implementation`
 - `service_url`
 - secret names, never secret values
+- the generated `config_api` secret name when that section is enabled
 - next-step commands for generated API keys
 - the sanitized command inventory used during setup
 

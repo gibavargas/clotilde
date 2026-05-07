@@ -110,6 +110,8 @@ Minimal `setup.json` shape:
 
 The wizard accepts optional `openai`, `openrouter`, `perplexity`, and `config_api` sections. At least one model provider (`claude`, `openrouter`, or `openai`) must be configured.
 
+The runtime `/api/config` endpoint is protected by the same service `X-API-Key` used for `/chat`. The `config_api` section is currently only a generated handoff secret for agent workflows that need it in `.clotilde/setup-result.json`.
+
 Secret values are never printed. If the wizard generates the service API key, retrieve it for the Apple Shortcut with:
 
 ```bash
@@ -180,7 +182,6 @@ The `.env` file should contain:
 - `GOOGLE_CLOUD_PROJECT`: Your Google Cloud project ID
 - `SERVICE_URL`: Your deployed service URL (optional, for testing)
 - `PERPLEXITY_KEY_SECRET_NAME`: Optional Perplexity Search API key
-- `CONFIG_API_KEY`: Optional dedicated runtime-configuration API key, if you enable `config_api`
 
 #### Admin Dashboard (Optional)
 
@@ -222,14 +223,7 @@ For local testing:
 
 ## Apple Shortcut Setup
 
-### Method 1: Import Shortcut File
-
-1. Open the `Clotilde.shortcut` file on your iPhone
-2. Configure the API key and service URL
-3. Enable "Show in CarPlay" in Shortcut settings
-4. Set Siri phrase: "Falar com Clotilde"
-
-### Method 2: Manual Setup
+Shortcut files are not committed to this repository. Create the shortcut manually in the Shortcuts app, or follow the fuller guide in [docs/SHORTCUT_SETUP.md](docs/SHORTCUT_SETUP.md).
 
 1. Open Shortcuts app on iPhone
 2. Create new shortcut named "Clotilde"
@@ -328,10 +322,11 @@ Perplexity is useful when you want search results formatted into the prompt befo
        --role="roles/secretmanager.secretAccessor"
    ```
 
-3. **Set Environment Variable** (in `deploy.sh` or Cloud Run):
+3. **Set Environment Variable**:
    ```bash
    export PERPLEXITY_SECRET_NAME=$PERPLEXITY_SECRET
    ```
+   `deploy.sh` reads `PERPLEXITY_SECRET_NAME` as the Secret Manager secret name. If you deploy with `gcloud run deploy` directly, mount that secret as the runtime environment variable `PERPLEXITY_KEY_SECRET_NAME`.
 
 4. **Configure via Admin Dashboard**:
    - Navigate to `/admin/` in your browser
@@ -349,7 +344,7 @@ When Perplexity is enabled and a web search query is detected:
 
 ### Configuration API
 
-The `/api/config` endpoint allows you to read and update system prompts and model configuration programmatically using your API key (same authentication as `/chat`). This is an alternative to the admin dashboard for programmatic access.
+The `/api/config` endpoint allows you to read and update system prompts and model configuration programmatically using your service API key, with the same `X-API-Key` authentication as `/chat`. This is an alternative to the admin dashboard for programmatic access.
 
 #### Get Current Configuration
 
@@ -568,7 +563,7 @@ curl -X POST https://your-service-url.run.app/api/config \
 - **Rate Limiting**: 10 requests/minute per API key, 100 requests/hour per IP
 - **Input Validation**: Max 1000 characters per message, 5KB request size limit
 - **Secrets Management**: All sensitive data in Google Secret Manager
-- **Secure Logging**: Full prompts/responses are visible in the authenticated admin dashboard and Cloud Logging
+- **Secure Logging**: Metadata-only request logs are the default; full prompts/responses are logged only when `LOG_FULL_CONTENT=true`
 - **HTTPS Only**: Enforced by Cloud Run
 - **Non-root Container**: Runs as unprivileged user
 - **No Secrets in Code**: All API keys and sensitive data use environment variables or Secret Manager
@@ -607,6 +602,8 @@ See [docs/SECURITY.md](docs/SECURITY.md) for detailed security documentation.
 ## Documentation
 
 - [docs/QUICKSTART.md](docs/QUICKSTART.md) - Quick 5-minute setup guide
+- [docs/PROVIDERS.md](docs/PROVIDERS.md) - Provider selection and model configuration
+- [docs/OPENCLAW_HERMES_SETUP.md](docs/OPENCLAW_HERMES_SETUP.md) - Agent-oriented setup wizard profiles
 - [docs/SECURITY.md](docs/SECURITY.md) - Security documentation and best practices
 - [docs/LOCAL_DOCKER.md](docs/LOCAL_DOCKER.md) - Local Docker development guide
 - [docs/SHORTCUT_SETUP.md](docs/SHORTCUT_SETUP.md) - Apple Shortcut setup guide (English)

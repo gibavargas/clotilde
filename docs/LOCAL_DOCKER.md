@@ -179,6 +179,6 @@ docker run -e PORT=$PORT -p 8081:8081 ...
 
 ## Next Steps
 
-- See [README.md](README.md) for full documentation
+- See [README.md](../README.md) for full documentation
 - See [SECURITY.md](SECURITY.md) for security best practices
 - See [agents.md](agents.md) for secret name configuration details
