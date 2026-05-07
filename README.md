@@ -43,7 +43,12 @@ The recommended setup path is the Go-based wizard. It checks local prerequisites
 go run ./cmd/clotilde-setup
 ```
 
-For OpenClaw-style agents and other automation, use non-interactive JSON mode:
+For OpenClaw, Hermes, and other agent automation, generate a starter template and run non-interactive JSON mode:
+
+```bash
+go run ./cmd/clotilde-setup --template openclaw > setup.openclaw.json
+go run ./cmd/clotilde-setup --template hermes > setup.hermes.json
+```
 
 ```bash
 go run ./cmd/clotilde-setup \
@@ -52,6 +57,8 @@ go run ./cmd/clotilde-setup \
   --output json \
   --yes
 ```
+
+See [OpenClaw and Hermes setup](docs/OPENCLAW_HERMES_SETUP.md) for the profile-specific flow.
 
 Dry-run mode prints the exact planned command sequence without changing Google Cloud resources:
 

@@ -14,6 +14,12 @@ import (
 
 var secretNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,255}$`)
 
+const (
+	implementationGeneric  = "generic"
+	implementationOpenClaw = "openclaw"
+	implementationHermes   = "hermes"
+)
+
 func loadConfig(path string) (SetupConfig, error) {
 	var cfg SetupConfig
 	if path == "" {
@@ -30,6 +36,7 @@ func loadConfig(path string) (SetupConfig, error) {
 }
 
 func applyDefaults(cfg *SetupConfig) {
+	cfg.Implementation = normalizeImplementation(cfg.Implementation)
 	if cfg.Region == "" {
 		cfg.Region = "us-central1"
 	}
@@ -49,6 +56,10 @@ func applyDefaults(cfg *SetupConfig) {
 
 func validateConfig(cfg SetupConfig) error {
 	var problems []string
+	implementation := normalizeImplementation(cfg.Implementation)
+	if !validImplementation(implementation) {
+		problems = append(problems, "implementation must be one of: generic, openclaw, hermes")
+	}
 	if strings.TrimSpace(cfg.ProjectID) == "" {
 		problems = append(problems, "project_id is required")
 	}
@@ -82,6 +93,32 @@ func validateConfig(cfg SetupConfig) error {
 		return errors.New(strings.Join(problems, "; "))
 	}
 	return nil
+}
+
+func normalizeImplementation(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "default":
+		return implementationGeneric
+	case "openclaw", "open-claw", "open_claw":
+		return implementationOpenClaw
+	case "hermes", "nemohermes", "nemo-hermes", "nemo_hermes":
+		return implementationHermes
+	default:
+		return strings.ToLower(strings.TrimSpace(value))
+	}
+}
+
+func validImplementation(value string) bool {
+	switch normalizeImplementation(value) {
+	case implementationGeneric, implementationOpenClaw, implementationHermes:
+		return true
+	default:
+		return false
+	}
+}
+
+func hasSecretSource(secret SecretConfig) bool {
+	return secret.UseExistingSecret || secret.Generate || secret.Value != "" || secret.ValueEnv != ""
 }
 
 func validateProvider(name string, provider ProviderConfig) []string {

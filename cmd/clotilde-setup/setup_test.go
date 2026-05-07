@@ -106,6 +106,65 @@ func TestValidateConfigOptionalProvidersCanBeDisabled(t *testing.T) {
 	}
 }
 
+func TestValidateConfigRejectsUnknownImplementation(t *testing.T) {
+	cfg := validTestConfig()
+	cfg.Implementation = "unknown-agent"
+
+	err := validateConfig(cfg)
+	if err == nil || !strings.Contains(err.Error(), "implementation must be one of") {
+		t.Fatalf("expected implementation validation error, got %v", err)
+	}
+}
+
+func TestTemplateConfigOpenClaw(t *testing.T) {
+	cfg, err := templateConfig("openclaw")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.Implementation != implementationOpenClaw {
+		t.Fatalf("expected openclaw implementation, got %q", cfg.Implementation)
+	}
+	if cfg.OpenAI.ValueEnv != "OPENAI_API_KEY" {
+		t.Fatalf("expected OpenAI env source, got %q", cfg.OpenAI.ValueEnv)
+	}
+	if !cfg.API.Generate {
+		t.Fatal("expected generated service API key")
+	}
+	if !cfg.Admin.Enabled || !cfg.Admin.Password.Generate {
+		t.Fatal("expected generated admin dashboard password")
+	}
+	if !cfg.ConfigAPI.Enabled || !cfg.ConfigAPI.Secret.Generate {
+		t.Fatal("expected generated config API key for OpenClaw profile")
+	}
+	if err := validateConfig(cfg); err != nil {
+		t.Fatalf("template should validate: %v", err)
+	}
+}
+
+func TestTemplateConfigHermes(t *testing.T) {
+	cfg, err := templateConfig("hermes")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.Implementation != implementationHermes {
+		t.Fatalf("expected hermes implementation, got %q", cfg.Implementation)
+	}
+	if !cfg.Claude.Enabled {
+		t.Fatal("expected Claude to be enabled for Hermes profile")
+	}
+	if cfg.Claude.Secret.ValueEnv != "ANTHROPIC_API_KEY" {
+		t.Fatalf("expected Anthropic env source, got %q", cfg.Claude.Secret.ValueEnv)
+	}
+	if !cfg.ConfigAPI.Enabled || !cfg.ConfigAPI.Secret.Generate {
+		t.Fatal("expected generated config API key for Hermes profile")
+	}
+	if err := validateConfig(cfg); err != nil {
+		t.Fatalf("template should validate: %v", err)
+	}
+}
+
 func TestDryRunCommandPlanningAndRedaction(t *testing.T) {
 	cfg := validTestConfig()
 	var stdout, stderr bytes.Buffer
@@ -193,6 +252,28 @@ func TestDryRunCLIProducesJSON(t *testing.T) {
 	}
 	if len(result.Commands) == 0 {
 		t.Fatal("expected command list in dry-run output")
+	}
+}
+
+func TestCLIPrintsHermesTemplateJSON(t *testing.T) {
+	cmd := exec.Command("go", "run", ".", "--template", "hermes", "--output", "json")
+	cmd.Dir = "."
+	var cmdStderr bytes.Buffer
+	cmd.Stderr = &cmdStderr
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("go run template failed: %v\nstdout:\n%s\nstderr:\n%s", err, string(output), cmdStderr.String())
+	}
+
+	var cfg SetupConfig
+	if err := json.Unmarshal(output, &cfg); err != nil {
+		t.Fatalf("expected JSON config template, got error %v\n%s", err, string(output))
+	}
+	if cfg.Implementation != implementationHermes {
+		t.Fatalf("expected hermes implementation, got %q", cfg.Implementation)
+	}
+	if !cfg.Claude.Enabled || cfg.Claude.Secret.ValueEnv != "ANTHROPIC_API_KEY" {
+		t.Fatalf("expected Hermes template to enable Claude from ANTHROPIC_API_KEY: %+v", cfg.Claude)
 	}
 }
 
