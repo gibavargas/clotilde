@@ -96,8 +96,8 @@ func TestHandleChat_MethodNotAllowed(t *testing.T) {
 	}
 }
 
-// TestHandleChat_RequestStructure tests that chat endpoint structure is correct
-// Note: Full integration tests require mocking OpenAI API
+// TestHandleChat_RequestStructure tests that chat endpoint structure is correct.
+// Note: Full integration tests require mocking an upstream AI provider.
 func TestHandleChat_RequestStructure(t *testing.T) {
 	os.Setenv("OPENAI_KEY_SECRET_NAME", "test-key")
 	os.Setenv("API_KEY_SECRET_NAME", "test-api-key")
@@ -121,11 +121,11 @@ func TestHandleChat_RequestStructure(t *testing.T) {
 	req.Header.Set("X-API-Key", "test-api-key")
 	rr := httptest.NewRecorder()
 
-	// This will fail because OpenAI client is not initialized, but that's expected
-	// We're just verifying the endpoint exists and accepts requests
+	// This will fail because no upstream AI provider key is configured, but that's expected.
+	// We're just verifying the endpoint exists and accepts requests.
 	server.handleChat(rr, req)
 
-	// We expect an error (500 or similar) because OpenAI client isn't set up
+	// We expect an error (500 or similar) because no provider is set up.
 	// But the endpoint should exist and handle the request structure
 	if rr.Code == 0 {
 		t.Error("Endpoint should return a status code")
@@ -304,7 +304,74 @@ func TestBuildSystemPrompt_CustomCategoryPromptWithTimePlaceholder(t *testing.T)
 	}
 }
 
+func TestMergeRuntimeConfig_PreservesUnspecifiedFields(t *testing.T) {
+	current := admin.RuntimeConfig{
+		BaseSystemPrompt:  "Base: %s",
+		SystemPrompt:      "Base: %s",
+		StandardModel:     "claude-haiku-4-5-20251001",
+		PremiumModel:      "claude-haiku-4-5-20251001",
+		PerplexityEnabled: true,
+	}
+	incoming := admin.RuntimeConfig{
+		PerplexityEnabled: false,
+	}
+	provided := map[string]json.RawMessage{
+		"perplexity_enabled": json.RawMessage("false"),
+	}
+
+	merged := mergeRuntimeConfig(current, incoming, provided)
+
+	if merged.StandardModel != current.StandardModel || merged.PremiumModel != current.PremiumModel {
+		t.Fatalf("expected models to be preserved, got %+v", merged)
+	}
+	if merged.BaseSystemPrompt != current.BaseSystemPrompt {
+		t.Fatalf("expected prompt to be preserved, got %q", merged.BaseSystemPrompt)
+	}
+	if merged.PerplexityEnabled {
+		t.Fatalf("expected perplexity_enabled=false")
+	}
+}
+
+func TestHandleSetConfigAPI_AllowsPartialUpdate(t *testing.T) {
+	defer admin.SetConfig(admin.RuntimeConfig{
+		BaseSystemPrompt:  clotildeBaseSystemPromptTemplate,
+		StandardModel:     defaultClaudeHaikuModel,
+		PremiumModel:      defaultClaudeHaikuModel,
+		PerplexityEnabled: true,
+	})
+
+	admin.SetConfig(admin.RuntimeConfig{
+		BaseSystemPrompt:  "Partial test: %s",
+		StandardModel:     "claude-haiku-4-5-20251001",
+		PremiumModel:      "claude-haiku-4-5-20251001",
+		PerplexityEnabled: true,
+	})
+
+	server := &Server{}
+	req := httptest.NewRequest("POST", "/api/config", strings.NewReader(`{"perplexity_enabled":false}`))
+	rr := httptest.NewRecorder()
+
+	server.handleSetConfigAPI(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected partial update to succeed, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var got admin.RuntimeConfig
+	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if got.PerplexityEnabled {
+		t.Fatalf("expected perplexity_enabled=false")
+	}
+	if got.StandardModel != "claude-haiku-4-5-20251001" {
+		t.Fatalf("expected standard model preserved, got %q", got.StandardModel)
+	}
+}
+
 func TestLogRequest_StoresRawAndSanitizedInputSeparately(t *testing.T) {
+	t.Setenv("LOG_FULL_CONTENT", "true")
+
 	logger := logging.NewLogger(4)
 	server := &Server{
 		logger: logger,
@@ -331,6 +398,234 @@ func TestLogRequest_StoresRawAndSanitizedInputSeparately(t *testing.T) {
 	}
 	if got.MessageLength != len(rawInput) {
 		t.Fatalf("expected message length %d, got %d", len(rawInput), got.MessageLength)
+	}
+}
+
+func TestLogRequest_DefaultsToMetadataOnly(t *testing.T) {
+	logger := logging.NewLogger(4)
+	server := &Server{
+		logger: logger,
+	}
+
+	req := httptest.NewRequest("POST", "/chat", nil)
+	req.RemoteAddr = "127.0.0.1:1234"
+
+	server.logRequest("req-private", req, "Minha mensagem privada", "Minha mensagem privada", "Resposta privada", "gpt-4o-mini", "factual", time.Second, "success", "")
+
+	entries := logger.GetEntries(1, 0)
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+
+	got := entries[0]
+	if got.RawInput != "" || got.Input != "" || got.Output != "" {
+		t.Fatalf("expected content fields to be empty by default, got raw=%q input=%q output=%q", got.RawInput, got.Input, got.Output)
+	}
+	if got.MessageLength != len("Minha mensagem privada") {
+		t.Fatalf("expected message length metadata to be preserved, got %d", got.MessageLength)
+	}
+}
+
+func TestRouteForAvailableProvider_FallsBackWhenClaudeKeyMissing(t *testing.T) {
+	server := &Server{openaiAPIKey: "test-openai-key"}
+	route := RouteDecision{
+		Model:           "claude-haiku-4-5-20251001",
+		WebSearch:       true,
+		ReasoningEffort: "medium",
+	}
+
+	got := server.routeForAvailableProvider(route)
+
+	if got.Model != openAIFallbackModel {
+		t.Fatalf("expected fallback model %q, got %q", openAIFallbackModel, got.Model)
+	}
+	if got.WebSearch != route.WebSearch {
+		t.Fatalf("expected web search setting to be preserved")
+	}
+	if got.ReasoningEffort != "" {
+		t.Fatalf("expected reasoning effort to be cleared for fallback model, got %q", got.ReasoningEffort)
+	}
+}
+
+func TestRouteForAvailableProvider_UsesOpenRouterWhenClaudeKeyMissing(t *testing.T) {
+	server := &Server{openRouterAPIKey: "test-openrouter-key"}
+	route := RouteDecision{
+		Model:           "claude-haiku-4-5-20251001",
+		WebSearch:       true,
+		ReasoningEffort: "medium",
+	}
+
+	got := server.routeForAvailableProvider(route)
+
+	if got.Model != openRouterClaudeHaikuModel {
+		t.Fatalf("expected OpenRouter fallback model %q, got %q", openRouterClaudeHaikuModel, got.Model)
+	}
+	if !got.WebSearch {
+		t.Fatalf("expected web search setting to be preserved")
+	}
+	if got.ReasoningEffort != "" {
+		t.Fatalf("expected reasoning effort to be cleared for OpenRouter fallback, got %q", got.ReasoningEffort)
+	}
+}
+
+func TestRouteForAvailableProvider_KeepsClaudeWhenKeyConfigured(t *testing.T) {
+	server := &Server{claudeAPIKey: "test-claude-key"}
+	route := RouteDecision{
+		Model:           "claude-haiku-4-5-20251001",
+		WebSearch:       false,
+		ReasoningEffort: "medium",
+	}
+
+	got := server.routeForAvailableProvider(route)
+
+	if got != route {
+		t.Fatalf("expected route to stay unchanged, got %+v", got)
+	}
+}
+
+func TestBuildOpenAIWebSearchRequest_UsesOpenAIFallbackForClaudeRoute(t *testing.T) {
+	store := true
+	route := RouteDecision{
+		Model:           "claude-haiku-4-5-20251001",
+		WebSearch:       true,
+		ReasoningEffort: "medium",
+	}
+
+	reqBody, fallbackRoute := buildOpenAIWebSearchRequest(route, "instructions", "latest news", &store)
+
+	if fallbackRoute.Model != openAIFallbackModel {
+		t.Fatalf("expected fallback model %q, got %q", openAIFallbackModel, fallbackRoute.Model)
+	}
+	if fallbackRoute.ReasoningEffort != "" {
+		t.Fatalf("expected reasoning effort to be cleared, got %q", fallbackRoute.ReasoningEffort)
+	}
+	if reqBody.Model != openAIFallbackModel {
+		t.Fatalf("expected request model %q, got %q", openAIFallbackModel, reqBody.Model)
+	}
+	if reqBody.Input != "latest news" {
+		t.Fatalf("expected input to be preserved, got %v", reqBody.Input)
+	}
+	if reqBody.Instructions != "instructions" {
+		t.Fatalf("expected instructions to be preserved, got %q", reqBody.Instructions)
+	}
+	if reqBody.Store == nil || !*reqBody.Store {
+		t.Fatalf("expected store=true")
+	}
+	if len(reqBody.Tools) != 1 {
+		t.Fatalf("expected one web search tool, got %d", len(reqBody.Tools))
+	}
+	tool, ok := reqBody.Tools[0].(WebSearchTool)
+	if !ok {
+		t.Fatalf("expected WebSearchTool, got %T", reqBody.Tools[0])
+	}
+	if tool.Type != "web_search" {
+		t.Fatalf("expected web_search tool, got %q", tool.Type)
+	}
+}
+
+func TestBuildOpenAIWebSearchRequest_KeepsOpenAIModel(t *testing.T) {
+	store := true
+	route := RouteDecision{
+		Model:           "gpt-5",
+		WebSearch:       true,
+		ReasoningEffort: "medium",
+	}
+
+	reqBody, fallbackRoute := buildOpenAIWebSearchRequest(route, "instructions", "latest news", &store)
+
+	if fallbackRoute != route {
+		t.Fatalf("expected route to stay unchanged, got %+v", fallbackRoute)
+	}
+	if reqBody.Model != route.Model {
+		t.Fatalf("expected request model %q, got %q", route.Model, reqBody.Model)
+	}
+}
+
+func TestBuildOpenRouterChatRequest_IncludesWebSearchTool(t *testing.T) {
+	reqBody := buildOpenRouterChatRequest(openRouterClaudeHaikuModel, "instructions", "latest news", true)
+
+	if reqBody.Model != "anthropic/claude-haiku-4.5" {
+		t.Fatalf("expected OpenRouter model slug to be stripped, got %q", reqBody.Model)
+	}
+	if reqBody.MaxTokens != 500 {
+		t.Fatalf("expected max_tokens=500, got %d", reqBody.MaxTokens)
+	}
+	if len(reqBody.Messages) != 2 {
+		t.Fatalf("expected system and user messages, got %d", len(reqBody.Messages))
+	}
+	if reqBody.Messages[0].Role != "system" || reqBody.Messages[0].Content != "instructions" {
+		t.Fatalf("unexpected system message: %+v", reqBody.Messages[0])
+	}
+	if reqBody.Messages[1].Role != "user" || reqBody.Messages[1].Content != "latest news" {
+		t.Fatalf("unexpected user message: %+v", reqBody.Messages[1])
+	}
+	if len(reqBody.Tools) != 1 || reqBody.Tools[0].Type != "openrouter:web_search" {
+		t.Fatalf("expected OpenRouter web search tool, got %+v", reqBody.Tools)
+	}
+}
+
+func TestBuildClaudeRequest_IncludesNativeWebSearchTool(t *testing.T) {
+	tools := []ClaudeTool{
+		{Type: "web_search_20250305", Name: "web_search", MaxUses: 3},
+	}
+
+	reqBody := buildClaudeRequest("claude-haiku-4-5-20251001", "instructions", "latest news", tools)
+
+	if reqBody.Model != "claude-haiku-4-5-20251001" {
+		t.Fatalf("expected Claude model to be preserved, got %q", reqBody.Model)
+	}
+	systemBlocks, ok := reqBody.System.([]ClaudeSystemBlock)
+	if !ok {
+		t.Fatalf("expected system prompt blocks, got %T", reqBody.System)
+	}
+	if len(systemBlocks) != 1 {
+		t.Fatalf("expected one system block, got %d", len(systemBlocks))
+	}
+	if systemBlocks[0].Text != "instructions" {
+		t.Fatalf("expected system prompt to be preserved, got %q", systemBlocks[0].Text)
+	}
+	if systemBlocks[0].CacheControl == nil || systemBlocks[0].CacheControl.Type != "ephemeral" {
+		t.Fatalf("expected ephemeral cache control, got %+v", systemBlocks[0].CacheControl)
+	}
+	if len(reqBody.Messages) != 1 || reqBody.Messages[0].Content != "latest news" {
+		t.Fatalf("expected user message to be preserved, got %+v", reqBody.Messages)
+	}
+	if len(reqBody.Tools) != 1 {
+		t.Fatalf("expected one Claude tool, got %d", len(reqBody.Tools))
+	}
+	if reqBody.Tools[0].Type != "web_search_20250305" || reqBody.Tools[0].Name != "web_search" || reqBody.Tools[0].MaxUses != 3 {
+		t.Fatalf("unexpected Claude web search tool: %+v", reqBody.Tools[0])
+	}
+}
+
+func TestClaudeWebSearchError_DetectsToolError(t *testing.T) {
+	resp := ClaudeResponse{
+		Content: []ClaudeContentBlock{
+			{
+				Type:    "web_search_tool_result",
+				Content: json.RawMessage(`{"type":"web_search_tool_result_error","error_code":"too_many_requests"}`),
+			},
+		},
+	}
+
+	err := claudeWebSearchError(resp)
+	if err == nil {
+		t.Fatalf("expected Claude web search error")
+	}
+	if !strings.Contains(err.Error(), "too_many_requests") {
+		t.Fatalf("expected error code in error, got %v", err)
+	}
+}
+
+func TestClaudeWebSearchError_IgnoresTextResponse(t *testing.T) {
+	resp := ClaudeResponse{
+		Content: []ClaudeContentBlock{
+			{Type: "text", Text: "current answer"},
+		},
+	}
+
+	if err := claudeWebSearchError(resp); err != nil {
+		t.Fatalf("expected no web search error, got %v", err)
 	}
 }
 
@@ -391,7 +686,9 @@ func TestCategoryPrompts_Factual(t *testing.T) {
 	factualChecks := []string{
 		"respostas diretas",
 		"Foque em precisão",
-		"informação pode estar desatualizada",
+		"Use web search para fatos factuais",
+		"Não use seu knowledge cutoff",
+		"não encontrou confirmação atual",
 	}
 
 	for _, check := range factualChecks {
@@ -487,7 +784,7 @@ func TestPromptHallucinationPrevention(t *testing.T) {
 	}
 }
 
-// Note: Integration tests that actually call the OpenAI API would require:
+// Note: Integration tests that actually call upstream AI providers would require:
 // 1. Valid API keys
 // 2. Mocking or test API setup
 // 3. Actual test cases for each edge case category

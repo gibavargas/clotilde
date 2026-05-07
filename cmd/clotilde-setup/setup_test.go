@@ -41,6 +41,13 @@ func validTestConfig() SetupConfig {
 				Value:      "test-claude-secret",
 			},
 		},
+		OpenRouter: ProviderConfig{
+			Enabled: true,
+			Secret: SecretConfig{
+				SecretName: "clotilde-openrouter-test",
+				Value:      "test-openrouter-secret",
+			},
+		},
 		Perplexity: ProviderConfig{
 			Enabled: true,
 			Secret: SecretConfig{
@@ -98,11 +105,37 @@ func TestValidateConfigAdminRequiresUsernameAndPasswordSource(t *testing.T) {
 func TestValidateConfigOptionalProvidersCanBeDisabled(t *testing.T) {
 	cfg := validTestConfig()
 	cfg.Claude = ProviderConfig{}
+	cfg.OpenRouter = ProviderConfig{}
 	cfg.Perplexity = ProviderConfig{}
 	cfg.ConfigAPI = ProviderConfig{}
 
 	if err := validateConfig(cfg); err != nil {
 		t.Fatalf("disabled optional providers should not require secrets: %v", err)
+	}
+}
+
+func TestValidateConfigRequiresAtLeastOneAIProvider(t *testing.T) {
+	cfg := validTestConfig()
+	cfg.OpenAI = SecretConfig{}
+	cfg.Claude = ProviderConfig{}
+	cfg.OpenRouter = ProviderConfig{}
+
+	err := validateConfig(cfg)
+	if err == nil || !strings.Contains(err.Error(), "at least one AI provider is required") {
+		t.Fatalf("expected AI provider validation error, got %v", err)
+	}
+}
+
+func TestValidateConfigRejectsGeneratedProviderKeys(t *testing.T) {
+	cfg := validTestConfig()
+	cfg.Claude.Secret = SecretConfig{
+		SecretName: "clotilde-claude-test",
+		Generate:   true,
+	}
+
+	err := validateConfig(cfg)
+	if err == nil || !strings.Contains(err.Error(), "claude.secret.generate cannot be used") {
+		t.Fatalf("expected generated provider key validation error, got %v", err)
 	}
 }
 
@@ -200,6 +233,7 @@ func TestDryRunCommandPlanningAndRedaction(t *testing.T) {
 		"CONFIG_API_KEY=clotilde-config-test:latest",
 		"PERPLEXITY_KEY_SECRET_NAME=clotilde-perplexity-test:latest",
 		"CLAUDE_KEY_SECRET_NAME=clotilde-claude-test:latest",
+		"OPENROUTER_KEY_SECRET_NAME=clotilde-openrouter-test:latest",
 		"ADMIN_USER=admin",
 	} {
 		if !strings.Contains(deployJoined, expected) {
@@ -208,7 +242,7 @@ func TestDryRunCommandPlanningAndRedaction(t *testing.T) {
 	}
 
 	output := stdout.String()
-	for _, secretValue := range []string{"test-openai-secret", "admin-password", "test-claude-secret", "test-perplexity-secret", "config-key"} {
+	for _, secretValue := range []string{"test-openai-secret", "admin-password", "test-claude-secret", "test-openrouter-secret", "test-perplexity-secret", "config-key"} {
 		if strings.Contains(output, secretValue) {
 			t.Fatalf("stdout leaked secret value %q", secretValue)
 		}
@@ -218,6 +252,7 @@ func TestDryRunCommandPlanningAndRedaction(t *testing.T) {
 func TestDryRunCLIProducesJSON(t *testing.T) {
 	cfg := validTestConfig()
 	cfg.Claude = ProviderConfig{}
+	cfg.OpenRouter = ProviderConfig{}
 	cfg.Perplexity = ProviderConfig{}
 	cfg.ConfigAPI = ProviderConfig{}
 

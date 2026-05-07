@@ -14,6 +14,7 @@ type SetupConfig struct {
 	OpenAI         SecretConfig   `json:"openai"`
 	API            SecretConfig   `json:"api"`
 	Claude         ProviderConfig `json:"claude,omitempty"`
+	OpenRouter     ProviderConfig `json:"openrouter,omitempty"`
 	Perplexity     ProviderConfig `json:"perplexity,omitempty"`
 	ConfigAPI      ProviderConfig `json:"config_api,omitempty"`
 	Admin          AdminConfig    `json:"admin,omitempty"`

@@ -8,12 +8,12 @@ WORKDIR /build
 
 # Copy go mod files first for better caching
 COPY go.mod ./
+COPY go.sum ./
 
 # Copy all source files (excluding what's in .dockerignore)
 COPY . .
 
-# Generate go.sum and download dependencies
-RUN go mod tidy
+# Download dependencies from the committed module graph
 RUN go mod download
 
 # Build the application
@@ -52,4 +52,3 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 
 # Run the application
 CMD ["/app/clotilde"]
-

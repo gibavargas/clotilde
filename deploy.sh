@@ -3,18 +3,21 @@
 # Prerequisites: setup-gcloud.sh has been run
 #
 # Required environment variables:
-#   OPENAI_SECRET - Name of your OpenAI API key secret in Secret Manager
 #   API_SECRET    - Name of your service API key secret in Secret Manager
+#   At least one AI provider secret:
+#     CLAUDE_SECRET, OPENROUTER_SECRET, or OPENAI_SECRET
 #
 # Optional environment variables:
-#   CLAUDE_SECRET        - Name of Claude (Anthropic) API key secret in Secret Manager (RECOMMENDED for fast responses)
+#   CLAUDE_SECRET        - Name of Claude (Anthropic) API key secret in Secret Manager (RECOMMENDED)
+#   OPENROUTER_SECRET    - Name of OpenRouter API key secret in Secret Manager
+#   OPENAI_SECRET        - Name of OpenAI API key secret in Secret Manager (Responses fallback)
 #   ADMIN_USER           - Admin username for dashboard (enables admin dashboard)
 #   ADMIN_SECRET         - Name of admin password secret in Secret Manager (enables admin dashboard)
 #   PERPLEXITY_SECRET_NAME - Name of Perplexity API key secret in Secret Manager (enables Perplexity Search API)
 #   LOG_BUFFER_SIZE      - Max log entries in memory (default: 1000)
 #
 # Example:
-#   export OPENAI_SECRET=my-openai-key-abc123
+#   export CLAUDE_SECRET=my-claude-key-abc123
 #   export API_SECRET=my-api-key-xyz789
 #   export ADMIN_USER=admin
 #   export ADMIN_SECRET=my-admin-password-secret
@@ -23,12 +26,16 @@
 set -e
 
 # Check required environment variables
-if [ -z "$OPENAI_SECRET" ] || [ -z "$API_SECRET" ]; then
+if [ -z "$API_SECRET" ] || { [ -z "$CLAUDE_SECRET" ] && [ -z "$OPENROUTER_SECRET" ] && [ -z "$OPENAI_SECRET" ]; }; then
     echo "ERROR: Required environment variables not set."
     echo ""
     echo "Please set the following environment variables:"
-    echo "  export OPENAI_SECRET=your-openai-secret-name"
     echo "  export API_SECRET=your-api-secret-name"
+    echo "  export CLAUDE_SECRET=your-claude-secret-name"
+    echo ""
+    echo "Or use another AI provider:"
+    echo "  export OPENROUTER_SECRET=your-openrouter-secret-name"
+    echo "  export OPENAI_SECRET=your-openai-secret-name"
     echo ""
     echo "Optional (for admin dashboard):"
     echo "  export ADMIN_USER=your-admin-username"
@@ -62,7 +69,10 @@ if [ -n "$ADMIN_USER" ]; then
 fi
 
 # Build secrets string
-SECRETS="OPENAI_KEY_SECRET_NAME=${OPENAI_SECRET}:latest,API_KEY_SECRET_NAME=${API_SECRET}:latest"
+SECRETS="API_KEY_SECRET_NAME=${API_SECRET}:latest"
+if [ -n "$OPENAI_SECRET" ]; then
+    SECRETS="${SECRETS},OPENAI_KEY_SECRET_NAME=${OPENAI_SECRET}:latest"
+fi
 if [ -n "$ADMIN_SECRET" ]; then
     SECRETS="${SECRETS},ADMIN_PASSWORD=${ADMIN_SECRET}:latest"
 fi
@@ -72,13 +82,18 @@ fi
 if [ -n "$CLAUDE_SECRET" ]; then
     SECRETS="${SECRETS},CLAUDE_KEY_SECRET_NAME=${CLAUDE_SECRET}:latest"
 fi
+if [ -n "$OPENROUTER_SECRET" ]; then
+    SECRETS="${SECRETS},OPENROUTER_KEY_SECRET_NAME=${OPENROUTER_SECRET}:latest"
+fi
 
 echo "Building and deploying Clotilde..."
 echo "Project ID: $PROJECT_ID"
 echo "Region: $REGION"
 echo "Image: $IMAGE_NAME"
-echo "OpenAI Secret: $OPENAI_SECRET"
 echo "API Secret: $API_SECRET"
+if [ -n "$OPENAI_SECRET" ]; then
+    echo "OpenAI Secret: $OPENAI_SECRET"
+fi
 if [ -n "$ADMIN_USER" ]; then
     echo "Admin User: $ADMIN_USER"
     echo "Admin Secret: $ADMIN_SECRET"
@@ -87,7 +102,10 @@ if [ -n "$PERPLEXITY_SECRET_NAME" ]; then
     echo "Perplexity Secret: $PERPLEXITY_SECRET_NAME"
 fi
 if [ -n "$CLAUDE_SECRET" ]; then
-    echo "Claude Secret: $CLAUDE_SECRET (RECOMMENDED for fast CarPlay responses)"
+    echo "Claude Secret: $CLAUDE_SECRET (recommended for fast CarPlay responses)"
+fi
+if [ -n "$OPENROUTER_SECRET" ]; then
+    echo "OpenRouter Secret: $OPENROUTER_SECRET"
 fi
 echo "Log Buffer Size: $LOG_BUFFER_SIZE"
 echo ""
@@ -129,4 +147,3 @@ echo "curl -X POST $SERVICE_URL/chat \\"
 echo "  -H 'Content-Type: application/json' \\"
 echo "  -H 'X-API-Key: YOUR_API_KEY' \\"
 echo "  -d '{\"message\":\"Hello\"}'"
-

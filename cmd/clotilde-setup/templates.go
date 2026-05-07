@@ -15,6 +15,10 @@ func templateConfig(name string) (SetupConfig, error) {
 		return cfg, nil
 	case implementationOpenClaw:
 		cfg := baseTemplate(implementationOpenClaw, true)
+		cfg.OpenAI = SecretConfig{
+			SecretName: "clotilde-oai",
+			ValueEnv:   "OPENAI_API_KEY",
+		}
 		cfg.ConfigAPI = generatedProvider("clotilde-config")
 		return cfg, nil
 	case implementationHermes:
@@ -50,13 +54,16 @@ func baseTemplate(implementation string, adminEnabled bool) SetupConfig {
 		RepoName:       "clotilde-repo",
 		ImageTag:       defaultImageTag,
 		LogBufferSize:  1000,
-		OpenAI: SecretConfig{
-			SecretName: "clotilde-oai",
-			ValueEnv:   "OPENAI_API_KEY",
-		},
 		API: SecretConfig{
 			SecretName: "clotilde-auth",
 			Generate:   true,
+		},
+		Claude: ProviderConfig{
+			Enabled: true,
+			Secret: SecretConfig{
+				SecretName: "clotilde-claude",
+				ValueEnv:   "ANTHROPIC_API_KEY",
+			},
 		},
 		Admin: AdminConfig{
 			Enabled:  adminEnabled,
@@ -72,11 +79,15 @@ func baseTemplate(implementation string, adminEnabled bool) SetupConfig {
 }
 
 func enableOptionalAgentSecrets(cfg *SetupConfig) {
-	cfg.Claude = ProviderConfig{
+	cfg.OpenAI = SecretConfig{
+		SecretName: "clotilde-oai",
+		ValueEnv:   "OPENAI_API_KEY",
+	}
+	cfg.OpenRouter = ProviderConfig{
 		Enabled: true,
 		Secret: SecretConfig{
-			SecretName: "clotilde-claude",
-			ValueEnv:   "ANTHROPIC_API_KEY",
+			SecretName: "clotilde-openrouter",
+			ValueEnv:   "OPENROUTER_API_KEY",
 		},
 	}
 	cfg.Perplexity = ProviderConfig{

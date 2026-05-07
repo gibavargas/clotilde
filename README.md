@@ -2,13 +2,15 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A voice-activated CarPlay assistant powered by GPT-5 with web search capabilities. Built with Go for minimal resource usage and deployed on Google Cloud Run with Artifact Registry.
+A voice-activated CarPlay assistant centered on Claude Haiku for low-latency CarPlay answers, with optional OpenRouter and OpenAI Responses fallbacks, web search support, and a low-footprint Go backend. Built for Google Cloud Run and Apple Shortcuts.
 
 ## Features
 
 - 🚗 CarPlay integration via Apple Shortcuts
-- 🧠 OpenAI Responses API with web search for real-time information
-- 🔍 **Perplexity AI Search API integration** - Alternative web search provider with toggle control
+- ⚡ Claude Haiku 4.5 direct API as the recommended primary model path
+- 🧭 OpenRouter fallback for OpenAI-compatible access to Claude Haiku and other hosted models
+- 🧠 Optional OpenAI Responses API fallback with native `web_search`
+- 🔍 **Perplexity AI Search API integration** - Optional search provider with toggle control
 - 🇧🇷 Brazilian Portuguese responses (default)
 - 🔒 Security-first design with API key authentication, rate limiting, and input validation
 - 💰 Free tier optimized (Google Cloud Artifact Registry + Cloud Run)
@@ -30,8 +32,20 @@ A voice-activated CarPlay assistant powered by GPT-5 with web search capabilitie
 - Google Cloud CLI (gcloud) installed and configured
 - Go 1.21+ installed
 - Docker installed (for local testing)
-- OpenAI API key
+- One upstream model key: Anthropic Claude API key, OpenRouter API key, or OpenAI API key
 - Apple iPhone with Shortcuts app
+
+## Provider Strategy
+
+Clotilde is optimized for fast spoken answers. The recommended setup is:
+
+1. **Primary**: Claude Haiku 4.5 via Anthropic API (`CLAUDE_KEY_SECRET_NAME`)
+2. **Fallback / aggregator**: OpenRouter (`OPENROUTER_KEY_SECRET_NAME`) using `openrouter/anthropic/claude-haiku-4.5`
+3. **Search fallback**: OpenAI Responses API (`OPENAI_KEY_SECRET_NAME`) when you want native OpenAI `web_search`
+
+OpenAI OAuth is not used for server-to-server calls to the OpenAI API. The backend sends `Authorization: Bearer ...`; for OpenAI’s API this should be a server-side API key. If you expose Clotilde through a GPT Action or another user-facing OpenAI OAuth flow, keep that OAuth layer in front of this service and continue protecting `/chat` with Clotilde’s own `X-API-Key`.
+
+See [`docs/PROVIDERS.md`](docs/PROVIDERS.md) for the full provider matrix.
 
 ## Setup
 
@@ -79,13 +93,16 @@ Minimal `setup.json` shape:
   "region": "us-central1",
   "service_name": "clotilde",
   "repo_name": "clotilde-repo",
-  "openai": {
-    "secret_name": "clotilde-oai-example",
-    "value_env": "OPENAI_API_KEY"
-  },
   "api": {
     "secret_name": "clotilde-auth-example",
     "generate": true
+  },
+  "claude": {
+    "enabled": true,
+    "secret": {
+      "secret_name": "clotilde-claude-example",
+      "value_env": "ANTHROPIC_API_KEY"
+    }
   },
   "admin": {
     "enabled": true,
@@ -97,6 +114,10 @@ Minimal `setup.json` shape:
   }
 }
 ```
+
+The wizard accepts optional `openai`, `openrouter`, `perplexity`, and `config_api` sections. At least one model provider (`claude`, `openrouter`, or `openai`) must be configured.
+
+The runtime `/api/config` endpoint is protected by the same service `X-API-Key` used for `/chat`. The `config_api` section is currently only a generated handoff secret for agent workflows that need it in `.clotilde/setup-result.json`.
 
 Secret values are never printed. If the wizard generates the service API key, retrieve it for the Apple Shortcut with:
 
@@ -110,8 +131,12 @@ The older scripts remain supported if you prefer to provision and deploy manuall
 
 ```bash
 # Set required environment variables
-export OPENAI_SECRET=your-openai-secret-name
 export API_SECRET=your-api-secret-name
+export CLAUDE_SECRET=your-claude-secret-name
+
+# Optional provider fallbacks
+export OPENROUTER_SECRET=your-openrouter-secret-name
+export OPENAI_SECRET=your-openai-secret-name
 
 # Optional: Enable admin dashboard
 export ADMIN_USER=admin
@@ -123,7 +148,7 @@ chmod +x deploy.sh
 ./deploy.sh
 ```
 
-`OPENAI_SECRET` and `API_SECRET` are Secret Manager secret names used by deployment scripts. Inside Cloud Run, `OPENAI_KEY_SECRET_NAME` and `API_KEY_SECRET_NAME` are mounted secret values consumed by the Go service.
+`API_SECRET` is the service authentication key secret name. `CLAUDE_SECRET`, `OPENROUTER_SECRET`, and `OPENAI_SECRET` are upstream provider secret names; set at least one. Inside Cloud Run, they are mounted as `API_KEY_SECRET_NAME`, `CLAUDE_KEY_SECRET_NAME`, `OPENROUTER_KEY_SECRET_NAME`, and `OPENAI_KEY_SECRET_NAME`.
 
 #### Cloud Build (Deprecated)
 
@@ -132,7 +157,7 @@ chmod +x deploy.sh
 ```bash
 # Submit build (use your secret names from the setup step)
 gcloud builds submit --config=cloudbuild.yaml \
-    --substitutions=_REGION=$REGION,_REPO_NAME=$REPO_NAME,_SERVICE_NAME=clotilde,_OPENAI_SECRET=$OPENAI_SECRET,_API_SECRET=$API_SECRET
+    --substitutions=_REGION=$REGION,_REPO_NAME=$REPO_NAME,_SERVICE_NAME=clotilde,_CLAUDE_SECRET=$CLAUDE_SECRET,_API_SECRET=$API_SECRET
 ```
 
 ### 3. Get Your Service URL
@@ -157,10 +182,13 @@ cp .env.example .env
 **Important**: Never commit `.env` files to git. They are already in `.gitignore`.
 
 The `.env` file should contain:
-- `OPENAI_KEY_SECRET_NAME`: Your OpenAI API key
 - `API_KEY_SECRET_NAME`: Your Clotilde service API key (get from Secret Manager)
+- `CLAUDE_KEY_SECRET_NAME`: Your Anthropic API key for Claude Haiku direct API
+- `OPENROUTER_KEY_SECRET_NAME`: Optional OpenRouter API key
+- `OPENAI_KEY_SECRET_NAME`: Optional OpenAI API key for Responses fallback
 - `GOOGLE_CLOUD_PROJECT`: Your Google Cloud project ID
 - `SERVICE_URL`: Your deployed service URL (optional, for testing)
+- `PERPLEXITY_KEY_SECRET_NAME`: Optional Perplexity Search API key
 
 #### Admin Dashboard (Optional)
 
@@ -168,6 +196,7 @@ To enable the admin dashboard for monitoring logs and statistics:
 - `ADMIN_USER`: Admin username for Basic Auth
 - `ADMIN_PASSWORD`: Admin password for Basic Auth (use a strong password)
 - `LOG_BUFFER_SIZE`: Maximum log entries to keep in memory (default: 1000)
+- `LOG_FULL_CONTENT`: Set to `true` only if you intentionally want full user prompts and AI responses in logs. Default logging stores metadata only.
 
 ### 5. Local Development (Optional)
 
@@ -187,8 +216,8 @@ For local testing:
    go run cmd/clotilde/main.go
    
    # Option B: Set directly
-   export OPENAI_KEY_SECRET_NAME=your-openai-key
    export API_KEY_SECRET_NAME=your-api-key
+   export CLAUDE_KEY_SECRET_NAME=your-claude-api-key
    export GOOGLE_CLOUD_PROJECT=your-project-id
    export PORT=8080
    go run cmd/clotilde/main.go
@@ -201,14 +230,7 @@ For local testing:
 
 ## Apple Shortcut Setup
 
-### Method 1: Import Shortcut File
-
-1. Open the `Clotilde.shortcut` file on your iPhone
-2. Configure the API key and service URL
-3. Enable "Show in CarPlay" in Shortcut settings
-4. Set Siri phrase: "Falar com Clotilde"
-
-### Method 2: Manual Setup
+Shortcut files are not committed to this repository. Create the shortcut manually in the Shortcuts app, or follow the fuller guide in [docs/SHORTCUT_SETUP.md](docs/SHORTCUT_SETUP.md).
 
 1. Open Shortcuts app on iPhone
 2. Create new shortcut named "Clotilde"
@@ -272,14 +294,21 @@ X-API-Key: your-api-key
 }
 ```
 
-### Perplexity Search API Integration
+### Web Search Providers
 
-Clotilde supports Perplexity AI Search API as an alternative to OpenAI's native web_search tool. When enabled, Perplexity provides web search results that are formatted and included in the system prompt for the OpenAI model.
+Clotilde can ground time-sensitive answers through provider-native search or through Perplexity. The order is:
+
+1. Claude direct API uses Claude's native `web_search_20250305` tool when configured.
+2. Perplexity can be enabled as an explicit search-results provider.
+3. OpenAI Responses falls back to native `web_search` when an OpenAI key is configured.
+4. OpenRouter falls back to the `openrouter:web_search` server tool when an OpenRouter key is configured.
+
+Perplexity is useful when you want search results formatted into the prompt before generation. When enabled, Perplexity provides web search results that are formatted and included in the system prompt for the selected model.
 
 #### Features
 
 - **Toggle Control**: Enable/disable Perplexity via admin dashboard or API (enabled by default)
-- **Automatic Fallback**: Falls back to OpenAI web_search if Perplexity fails
+- **Automatic Fallback**: Falls back to OpenAI or OpenRouter web search if Perplexity fails and those keys are configured
 - **Language Filtering**: Automatically filters results by language (Portuguese for Brazilian queries)
 - **Result Formatting**: Search results are formatted and explained in the system prompt
 
@@ -300,10 +329,11 @@ Clotilde supports Perplexity AI Search API as an alternative to OpenAI's native 
        --role="roles/secretmanager.secretAccessor"
    ```
 
-3. **Set Environment Variable** (in `deploy.sh` or Cloud Run):
+3. **Set Environment Variable**:
    ```bash
    export PERPLEXITY_SECRET_NAME=$PERPLEXITY_SECRET
    ```
+   `deploy.sh` reads `PERPLEXITY_SECRET_NAME` as the Secret Manager secret name. If you deploy with `gcloud run deploy` directly, mount that secret as the runtime environment variable `PERPLEXITY_KEY_SECRET_NAME`.
 
 4. **Configure via Admin Dashboard**:
    - Navigate to `/admin/` in your browser
@@ -316,12 +346,12 @@ When Perplexity is enabled and a web search query is detected:
 1. Perplexity Search API is called with the user's query
 2. Results are formatted with titles, URLs, and snippets
 3. Formatted results are appended to the system prompt with explanation
-4. OpenAI model uses these results to generate the response
-5. If Perplexity fails, automatically falls back to OpenAI's web_search tool
+4. The selected model uses these results to generate the response
+5. If Perplexity fails, Clotilde automatically falls back to provider-native web search when OpenAI or OpenRouter is configured
 
 ### Configuration API
 
-The `/api/config` endpoint allows you to read and update system prompts and model configuration programmatically using your API key (same authentication as `/chat`). This is an alternative to the admin dashboard for programmatic access.
+The `/api/config` endpoint allows you to read and update system prompts and model configuration programmatically using your service API key, with the same `X-API-Key` authentication as `/chat`. This is an alternative to the admin dashboard for programmatic access.
 
 #### Get Current Configuration
 
@@ -345,8 +375,8 @@ X-API-Key: your-api-key
     "mathematical": "...",
     "creative": "..."
   },
-  "standard_model": "gpt-4.1-mini",
-  "premium_model": "gpt-4.1-mini",
+  "standard_model": "claude-haiku-4-5-20251001",
+  "premium_model": "claude-haiku-4-5-20251001",
   "perplexity_enabled": true,
   "category_models": {}
 }
@@ -372,11 +402,11 @@ X-API-Key: your-api-key
     "web_search": "Custom prompt for web search...",
     "complex": "Custom prompt for complex queries..."
   },
-  "standard_model": "gpt-4o-mini",
-  "premium_model": "gpt-4.1",
+  "standard_model": "openrouter/anthropic/claude-haiku-4.5",
+  "premium_model": "claude-haiku-4-5-20251001",
   "perplexity_enabled": true,
   "category_models": {
-    "web_search": "gpt-4o"
+    "web_search": "openrouter/anthropic/claude-haiku-4.5"
   }
 }
 ```
@@ -386,8 +416,8 @@ X-API-Key: your-api-key
 {
   "base_system_prompt": "...",
   "category_prompts": {...},
-  "standard_model": "gpt-4o-mini",
-  "premium_model": "gpt-4.1",
+  "standard_model": "openrouter/anthropic/claude-haiku-4.5",
+  "premium_model": "claude-haiku-4-5-20251001",
   "perplexity_enabled": true,
   "category_models": {...}
 }
@@ -405,7 +435,7 @@ curl -X POST https://your-service-url.run.app/api/config \
   }'
 ```
 
-To disable Perplexity (use OpenAI web_search instead):
+To disable Perplexity and use provider-native web search instead:
 ```bash
 curl -X POST https://your-service-url.run.app/api/config \
   -H "Content-Type: application/json" \
@@ -428,7 +458,7 @@ Note: You can update just the `perplexity_enabled` field without changing other 
 - Base system prompt must contain exactly one `%s` placeholder for date/time
 - Maximum prompt size: 10KB per prompt
 - Maximum request body size: 50KB
-- Models must be valid OpenAI Responses API models
+- Models must be valid provider model IDs. OpenRouter models use the `openrouter/<provider>/<model>` prefix, for example `openrouter/anthropic/claude-haiku-4.5`.
 - Changes take effect immediately for all new requests
 
 **Status Codes:**
@@ -491,8 +521,8 @@ curl -X POST https://your-service-url.run.app/api/config \
   -H "Content-Type: application/json" \
   -H "X-API-Key: YOUR_API_KEY" \
   -d '{
-    "standard_model": "gpt-4.1-mini",
-    "premium_model": "gpt-4.1"
+    "standard_model": "claude-haiku-4-5-20251001",
+    "premium_model": "claude-haiku-4-5-20251001"
   }'
 ```
 
@@ -503,8 +533,8 @@ curl -X POST https://your-service-url.run.app/api/config \
 
 #### What You Can Change Without Redeployment:
 
-- **Standard Model**: Model for simple queries (e.g., `gpt-4.1-mini`, `gpt-4o-mini`, `gpt-4o`)
-- **Premium Model**: Model for complex queries (e.g., `gpt-4.1`, `gpt-4o`, `o3`)
+- **Standard Model**: Model for simple queries (e.g., `claude-haiku-4-5-20251001`, `openrouter/anthropic/claude-haiku-4.5`, `gpt-4o-mini`)
+- **Premium Model**: Model for complex queries (e.g., `claude-haiku-4-5-20251001`, `openrouter/anthropic/claude-haiku-4.5`, `gpt-4.1`)
 - **System Prompts**: AI personality and behavior instructions
 - **Category Models**: Override models for specific query types (web search, creative, etc.)
 - **Perplexity Integration**: Enable/disable web search via Perplexity API
@@ -514,13 +544,13 @@ curl -X POST https://your-service-url.run.app/api/config \
 If users experience timeouts, switch to faster models:
 
 ```bash
-# Switch from slow gpt-5.1 to fast gpt-4.1-mini
+# Switch to fast Claude Haiku for CarPlay latency
 curl -X POST https://your-service-url.run.app/api/config \
   -H "Content-Type: application/json" \
   -H "X-API-Key: YOUR_API_KEY" \
   -d '{
-    "standard_model": "gpt-4.1-mini",
-    "premium_model": "gpt-4o"
+    "standard_model": "claude-haiku-4-5-20251001",
+    "premium_model": "claude-haiku-4-5-20251001"
   }'
 ```
 
@@ -529,7 +559,7 @@ curl -X POST https://your-service-url.run.app/api/config \
 ### Security
 
 - Protected by HTTP Basic Auth (separate from API key authentication)
-- Full user input and AI responses are logged for debugging and monitoring (stored in-memory buffer and Google Cloud Logging)
+- Metadata-only request logs are enabled by default; full prompts/responses are logged only when `LOG_FULL_CONTENT=true`
 - Logs are protected by authentication (admin dashboard) and IAM (Cloud Logging)
 - Admin credentials should be stored securely (use Secret Manager in production)
 - See `docs/SECURITY.md` for detailed information about data retention and access controls
@@ -540,7 +570,7 @@ curl -X POST https://your-service-url.run.app/api/config \
 - **Rate Limiting**: 10 requests/minute per API key, 100 requests/hour per IP
 - **Input Validation**: Max 1000 characters per message, 5KB request size limit
 - **Secrets Management**: All sensitive data in Google Secret Manager
-- **Secure Logging**: Full prompts/responses are visible in the authenticated admin dashboard and Cloud Logging
+- **Secure Logging**: Metadata-only request logs are the default; full prompts/responses are logged only when `LOG_FULL_CONTENT=true`
 - **HTTPS Only**: Enforced by Cloud Run
 - **Non-root Container**: Runs as unprivileged user
 - **No Secrets in Code**: All API keys and sensitive data use environment variables or Secret Manager
@@ -579,6 +609,8 @@ See [docs/SECURITY.md](docs/SECURITY.md) for detailed security documentation.
 ## Documentation
 
 - [docs/QUICKSTART.md](docs/QUICKSTART.md) - Quick 5-minute setup guide
+- [docs/PROVIDERS.md](docs/PROVIDERS.md) - Provider selection and model configuration
+- [docs/OPENCLAW_HERMES_SETUP.md](docs/OPENCLAW_HERMES_SETUP.md) - Agent-oriented setup wizard profiles
 - [docs/SECURITY.md](docs/SECURITY.md) - Security documentation and best practices
 - [docs/LOCAL_DOCKER.md](docs/LOCAL_DOCKER.md) - Local Docker development guide
 - [docs/SHORTCUT_SETUP.md](docs/SHORTCUT_SETUP.md) - Apple Shortcut setup guide (English)

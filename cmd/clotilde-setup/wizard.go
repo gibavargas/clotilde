@@ -149,7 +149,6 @@ func collectInteractiveConfig(ctx context.Context, cfg SetupConfig, runner Comma
 		cfg.LogBufferSize = promptInt(reader, stdout, "Log buffer size", valueOrDefault(strconv.Itoa(cfg.LogBufferSize), "1000"))
 	}
 
-	cfg.OpenAI = collectSecretSource(reader, stdinFile, stdout, cfg.OpenAI, "OpenAI API key", defaultSecretName("clotilde-oai"), []string{"OPENAI_API_KEY", "OPENAI_KEY_SECRET_NAME"}, false, false)
 	cfg.API = collectSecretSource(reader, stdinFile, stdout, cfg.API, "Service API key", defaultSecretName("clotilde-auth"), []string{"CLOTILDE_API_KEY", "API_KEY_SECRET_NAME"}, true, true)
 
 	cfg.Admin.Enabled = confirm(reader, stdout, "Enable admin dashboard?", cfg.Admin.Enabled || quick)
@@ -158,9 +157,18 @@ func collectInteractiveConfig(ctx context.Context, cfg SetupConfig, runner Comma
 		cfg.Admin.Password = collectSecretSource(reader, stdinFile, stdout, cfg.Admin.Password, "Admin password", defaultSecretName("clotilde-admin"), []string{"CLOTILDE_ADMIN_PASSWORD", "ADMIN_PASSWORD"}, true, true)
 	}
 
-	cfg.Claude.Enabled = confirm(reader, stdout, "Enable Claude fast responses?", cfg.Claude.Enabled || cfg.Implementation == implementationHermes)
+	cfg.Claude.Enabled = confirm(reader, stdout, "Enable Claude Haiku direct API?", cfg.Claude.Enabled || cfg.Implementation == implementationGeneric || cfg.Implementation == implementationHermes)
 	if cfg.Claude.Enabled {
 		cfg.Claude.Secret = collectSecretSource(reader, stdinFile, stdout, cfg.Claude.Secret, "Claude API key", defaultSecretName("clotilde-claude"), []string{"ANTHROPIC_API_KEY", "CLAUDE_API_KEY", "CLAUDE_KEY_SECRET_NAME"}, false, false)
+	}
+
+	cfg.OpenRouter.Enabled = confirm(reader, stdout, "Enable OpenRouter fallback?", cfg.OpenRouter.Enabled)
+	if cfg.OpenRouter.Enabled {
+		cfg.OpenRouter.Secret = collectSecretSource(reader, stdinFile, stdout, cfg.OpenRouter.Secret, "OpenRouter API key", defaultSecretName("clotilde-openrouter"), []string{"OPENROUTER_API_KEY", "OPENROUTER_KEY_SECRET_NAME"}, false, false)
+	}
+
+	if isSecretConfigured(cfg.OpenAI) || confirm(reader, stdout, "Enable OpenAI Responses fallback?", cfg.OpenAI.SecretName != "" || cfg.Implementation == implementationOpenClaw) {
+		cfg.OpenAI = collectSecretSource(reader, stdinFile, stdout, cfg.OpenAI, "OpenAI API key", defaultSecretName("clotilde-oai"), []string{"OPENAI_API_KEY", "OPENAI_KEY_SECRET_NAME"}, false, false)
 	}
 
 	cfg.Perplexity.Enabled = confirm(reader, stdout, "Enable Perplexity search?", cfg.Perplexity.Enabled)

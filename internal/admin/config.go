@@ -29,7 +29,7 @@ var (
 		CategoryModels:    make(map[string]string),
 		StandardModel:     "claude-haiku-4-5-20251001", // Claude Haiku 4.5 - fastest, ideal for CarPlay
 		PremiumModel:      "claude-haiku-4-5-20251001", // Same fast model for all queries to avoid timeouts
-		PerplexityEnabled: true,                      // Default: enabled
+		PerplexityEnabled: true,                        // Default: enabled
 	}
 	defaultCategoryPrompts = make(map[string]string) // Store default category prompts
 	initialized            = false
@@ -142,50 +142,11 @@ func validateSystemPrompt(prompt string) error {
 // SetConfig updates the runtime configuration
 // Returns error if validation fails
 func SetConfig(newConfig RuntimeConfig) error {
-	// All models that can be used - OpenAI and Claude (Anthropic)
-	validModels := map[string]bool{
-		// GPT-4o series (confirmed working)
-		"gpt-4o":            true,
-		"gpt-4o-mini":       true,
-		"gpt-4o-2024-08-06": true,
-		"chatgpt-4o-latest": true,
-		// GPT-4 series
-		"gpt-4-turbo":   true,
-		"gpt-3.5-turbo": true,
-		// GPT-4.1 series (may require specific API access)
-		"gpt-4.1":      true,
-		"gpt-4.1-mini": true,
-		"gpt-4.1-nano": true,
-		// GPT-5 series (may require specific API access)
-		"gpt-5":      true,
-		"gpt-5.1":    true,
-		"gpt-5-mini": true,
-		"gpt-5-nano": true,
-		"gpt-5-pro":  true,
-		// O-series reasoning models
-		"o1":      true,
-		"o1-mini": true,
-		"o1-pro":  true,
-		"o3":      true,
-		"o3-mini": true,
-		"o4-mini": true,
-		// Claude models (Anthropic) - FAST, ideal for CarPlay
-		// Claude Haiku 4.5 is extremely fast (~1-3s), best for CarPlay
-		"claude-haiku-4-5-20251001": true, // Latest Haiku 4.5 - fastest, best for CarPlay
-		// Older Claude models (for backward compatibility)
-		"claude-3-5-haiku-20241022":  true,
-		"claude-3-5-haiku-latest":    true,
-		"claude-3-5-sonnet-20241022": true,
-		"claude-3-5-sonnet-latest":   true,
-		"claude-sonnet-4-20250514":   true, // Claude Sonnet 4
-		"claude-3-opus-20240229":     true, // Most capable but slower
-	}
-
-	if !validModels[newConfig.StandardModel] {
+	if !IsValidModel(newConfig.StandardModel) {
 		return &ConfigError{Field: "standard_model", Message: "Invalid standard model"}
 	}
 
-	if !validModels[newConfig.PremiumModel] {
+	if !IsValidModel(newConfig.PremiumModel) {
 		return &ConfigError{Field: "premium_model", Message: "Invalid premium model"}
 	}
 
@@ -221,7 +182,7 @@ func SetConfig(newConfig RuntimeConfig) error {
 
 	// Validate category models if provided
 	for category, model := range newConfig.CategoryModels {
-		if !validModels[model] {
+		if !IsValidModel(model) {
 			return &ConfigError{Field: "category_models." + category, Message: "Invalid model for category"}
 		}
 	}

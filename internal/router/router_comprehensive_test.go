@@ -114,10 +114,10 @@ func TestModelSelection(t *testing.T) {
 			expectedModel: "gpt-4.1", // Premium model
 		},
 		{
-			name:          "Factual uses standard model",
+			name:          "Factual uses standard model with web search",
 			question:      "Quem é o presidente?",
 			expectedCat:   CategoryFactual,
-			webSearch:     false,
+			webSearch:     true,
 			standardModel: "gpt-4o-mini",
 			premiumModel:  "gpt-4.1",
 			expectedModel: "gpt-4o-mini", // Standard model
@@ -217,6 +217,40 @@ func TestWebSearchFallback(t *testing.T) {
 		BaseSystemPrompt: config.BaseSystemPrompt,
 		StandardModel:    originalStandard,
 		PremiumModel:     config.PremiumModel,
+	})
+}
+
+func TestOpenRouterWebSearchDoesNotUseOpenAIFallback(t *testing.T) {
+	config := admin.GetConfig()
+	originalStandard := config.StandardModel
+	originalPremium := config.PremiumModel
+	originalCategoryModels := config.CategoryModels
+
+	admin.SetConfig(admin.RuntimeConfig{
+		BaseSystemPrompt:  config.BaseSystemPrompt,
+		StandardModel:     "openrouter/anthropic/claude-haiku-4.5",
+		PremiumModel:      config.PremiumModel,
+		CategoryModels:    make(map[string]string),
+		PerplexityEnabled: config.PerplexityEnabled,
+	})
+
+	decision := Route("Quais as notícias?")
+	if decision.Category != CategoryWebSearch {
+		t.Errorf("Expected CategoryWebSearch, got %s", decision.Category)
+	}
+	if !decision.WebSearch {
+		t.Error("Expected webSearch=true")
+	}
+	if decision.Model != "openrouter/anthropic/claude-haiku-4.5" {
+		t.Errorf("Expected OpenRouter model to be preserved, got %s", decision.Model)
+	}
+
+	admin.SetConfig(admin.RuntimeConfig{
+		BaseSystemPrompt:  config.BaseSystemPrompt,
+		StandardModel:     originalStandard,
+		PremiumModel:      originalPremium,
+		CategoryModels:    originalCategoryModels,
+		PerplexityEnabled: config.PerplexityEnabled,
 	})
 }
 

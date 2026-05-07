@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/clotilde/carplay-assistant/internal/clientip"
 	"github.com/clotilde/carplay-assistant/internal/logging"
 )
 
@@ -102,71 +103,7 @@ func NewHandler(logger *logging.Logger) *Handler {
 
 // getClientIP extracts client IP from request
 func getClientIP(r *http.Request) string {
-	// Check X-Real-IP header first (most trusted in Google Cloud Run)
-	// Cloud Run sets X-Real-IP reliably and strips user input, making it safe to trust
-	realIP := r.Header.Get("X-Real-IP")
-	if realIP != "" {
-		realIP = strings.TrimSpace(realIP)
-		// Remove port if present
-		if strings.HasPrefix(realIP, "[") {
-			// IPv6 with brackets
-			if idx := strings.Index(realIP, "]:"); idx != -1 {
-				realIP = realIP[:idx+1]
-			}
-		} else {
-			// IPv4 or IPv6 without brackets
-			if idx := strings.Index(realIP, ":"); idx != -1 {
-				realIP = realIP[:idx]
-			}
-		}
-		return realIP
-	}
-
-	// Fallback to X-Forwarded-For header (Cloud Run appends real IP to existing header)
-	// In Cloud Run: if attacker sends "X-Forwarded-For: 1.2.3.4", Cloud Run appends real IP
-	// Result: "1.2.3.4, <Real-IP>". We must take the RIGHTmost IP (after trusted proxies)
-	forwarded := r.Header.Get("X-Forwarded-For")
-	if forwarded != "" {
-		// Extract rightmost IP (most recent, added by Cloud Run)
-		// X-Forwarded-For format: "client, proxy1, proxy2" or "spoofed, real-ip"
-		ips := strings.Split(forwarded, ",")
-		var ip string
-		if len(ips) > 0 {
-			// Take the last (rightmost) IP
-			ip = strings.TrimSpace(ips[len(ips)-1])
-		} else {
-			ip = strings.TrimSpace(forwarded)
-		}
-
-		// Remove port if present
-		if strings.HasPrefix(ip, "[") {
-			// IPv6 with brackets
-			if idx := strings.Index(ip, "]:"); idx != -1 {
-				ip = ip[:idx+1]
-			}
-		} else {
-			// IPv4 or IPv6 without brackets
-			if idx := strings.Index(ip, ":"); idx != -1 {
-				ip = ip[:idx]
-			}
-		}
-		return ip
-	}
-
-	// Final fallback to RemoteAddr (remove port if present)
-	addr := r.RemoteAddr
-	if strings.HasPrefix(addr, "[") {
-		// IPv6 with brackets
-		if idx := strings.Index(addr, "]:"); idx != -1 {
-			addr = addr[:idx+1]
-		}
-	} else {
-		// IPv4 or IPv6 without brackets
-		if idx := strings.LastIndex(addr, ":"); idx != -1 {
-			addr = addr[:idx]
-		}
-	}
-	return addr
+	return clientip.FromRequest(r)
 }
 
 // hashIPUserAgent creates a hash of IP + User-Agent for session tracking
@@ -504,7 +441,7 @@ func (h *Handler) BasicAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Set security headers on all admin responses (no nonce needed for non-HTML responses)
 		setSecurityHeaders(w, "")
-		
+
 		if !h.IsEnabled() {
 			// Return proper error with instructions instead of 404
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")

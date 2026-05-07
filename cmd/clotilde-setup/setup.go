@@ -100,14 +100,21 @@ func provision(ctx context.Context, cfg SetupConfig, runner CommandRunner, stdou
 		}
 	}
 
-	if err := createOrUpdateSecret(ctx, runner, cfg.OpenAI); err != nil {
-		return err
+	if isSecretConfigured(cfg.OpenAI) {
+		if err := createOrUpdateSecret(ctx, runner, cfg.OpenAI); err != nil {
+			return err
+		}
 	}
 	if err := createOrUpdateSecret(ctx, runner, cfg.API); err != nil {
 		return err
 	}
 	if cfg.Claude.Enabled {
 		if err := createOrUpdateSecret(ctx, runner, cfg.Claude.Secret); err != nil {
+			return err
+		}
+	}
+	if cfg.OpenRouter.Enabled {
+		if err := createOrUpdateSecret(ctx, runner, cfg.OpenRouter.Secret); err != nil {
 			return err
 		}
 	}
@@ -261,8 +268,10 @@ func buildEnvVars(cfg SetupConfig, dryRun bool) string {
 
 func buildSecretVars(cfg SetupConfig) string {
 	secrets := []string{
-		"OPENAI_KEY_SECRET_NAME=" + cfg.OpenAI.SecretName + ":latest",
 		"API_KEY_SECRET_NAME=" + cfg.API.SecretName + ":latest",
+	}
+	if isSecretConfigured(cfg.OpenAI) {
+		secrets = append(secrets, "OPENAI_KEY_SECRET_NAME="+cfg.OpenAI.SecretName+":latest")
 	}
 	if cfg.Admin.Enabled {
 		secrets = append(secrets, "ADMIN_PASSWORD="+cfg.Admin.Password.SecretName+":latest")
@@ -275,6 +284,9 @@ func buildSecretVars(cfg SetupConfig) string {
 	}
 	if cfg.Claude.Enabled {
 		secrets = append(secrets, "CLAUDE_KEY_SECRET_NAME="+cfg.Claude.Secret.SecretName+":latest")
+	}
+	if cfg.OpenRouter.Enabled {
+		secrets = append(secrets, "OPENROUTER_KEY_SECRET_NAME="+cfg.OpenRouter.Secret.SecretName+":latest")
 	}
 	return strings.Join(secrets, ",")
 }

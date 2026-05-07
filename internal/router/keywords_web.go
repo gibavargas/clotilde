@@ -40,6 +40,15 @@ func init() {
 		"desenvolvimento", "exportação", "importação", "balança comercial", "superávit", "déficit",
 		"dívida pública", "orçamento", "teto de gastos", "reforma tributária", "reforma administrativa",
 
+		// Automotive prices & market data
+		"quanto custa", "custa", "custando", "valor de mercado", "preço de tabela", "preço sugerido",
+		"preço público", "preço 0km", "preço zero km", "carro 0km", "carro zero km", "0km", "zero km",
+		"veículo 0km", "veículo zero km", "modelo 0km", "modelo zero km", "versão 0km", "versão zero km",
+		"tabela fipe", "fipe", "preço fipe", "configurador", "montadora", "concessionária",
+		"concessionária perto", "oferta de carro", "promoção de carro", "preço de carro", "valor do carro",
+		"preço do carro", "valor do veículo", "preço do veículo", "carro novo", "veículo novo",
+		"lançamento automotivo", "linha 2026", "ano modelo", "modelo 2026",
+
 		// Weather & Environment
 		"tempo", "clima", "previsão", "chuva", "temperatura", "previsão do tempo", "clima hoje",
 		"vai chover", "faz calor", "faz frio", "umidade", "vento", "precipitação", "neve", "granizo",
