@@ -65,6 +65,18 @@ func TestRoute(t *testing.T) {
 			expectedWebSearch: true,
 		},
 		{
+			name:              "Factual - Public Servant Legal Rule",
+			question:          "Qual as regras de redução de jornada para funcionários públicos do Distrito Federal?",
+			expectedCategory:  CategoryFactual,
+			expectedWebSearch: true,
+		},
+		{
+			name:              "Factual - Public Servant Legal Topic Without Question Word",
+			question:          "redução de jornada servidor público DF",
+			expectedCategory:  CategoryFactual,
+			expectedWebSearch: true,
+		},
+		{
 			name:              "Factual - Static Fact",
 			question:          "Qual a capital da França?",
 			expectedCategory:  CategoryFactual,

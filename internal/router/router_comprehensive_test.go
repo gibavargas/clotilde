@@ -254,6 +254,41 @@ func TestOpenRouterWebSearchDoesNotUseOpenAIFallback(t *testing.T) {
 	})
 }
 
+func TestClaudeWebSearchDoesNotRequirePerplexity(t *testing.T) {
+	config := admin.GetConfig()
+	originalStandard := config.StandardModel
+	originalPremium := config.PremiumModel
+	originalCategoryModels := config.CategoryModels
+	originalPerplexity := config.PerplexityEnabled
+
+	admin.SetConfig(admin.RuntimeConfig{
+		BaseSystemPrompt:  config.BaseSystemPrompt,
+		StandardModel:     "claude-haiku-4-5-20251001",
+		PremiumModel:      config.PremiumModel,
+		CategoryModels:    make(map[string]string),
+		PerplexityEnabled: false,
+	})
+
+	decision := Route("Qual as regras de redução de jornada para funcionários públicos do Distrito Federal?")
+	if decision.Category != CategoryFactual {
+		t.Errorf("Expected CategoryFactual, got %s", decision.Category)
+	}
+	if !decision.WebSearch {
+		t.Error("Expected webSearch=true")
+	}
+	if decision.Model != "claude-haiku-4-5-20251001" {
+		t.Errorf("Expected Claude model to be preserved, got %s", decision.Model)
+	}
+
+	admin.SetConfig(admin.RuntimeConfig{
+		BaseSystemPrompt:  config.BaseSystemPrompt,
+		StandardModel:     originalStandard,
+		PremiumModel:      originalPremium,
+		CategoryModels:    originalCategoryModels,
+		PerplexityEnabled: originalPerplexity,
+	})
+}
+
 // TestGPT5ReasoningEffort tests GPT-5 series requires reasoning for web search
 func TestGPT5ReasoningEffort(t *testing.T) {
 	config := admin.GetConfig()

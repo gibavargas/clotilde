@@ -38,7 +38,7 @@ steps:
         [ -n "${_ADMIN_SECRET}" ] && SECRETS="$${SECRETS},ADMIN_PASSWORD=${_ADMIN_SECRET}:latest"
         [ -n "${_CLAUDE_SECRET}" ] && SECRETS="$${SECRETS},CLAUDE_KEY_SECRET_NAME=${_CLAUDE_SECRET}:latest"
         [ -n "${_OPENROUTER_SECRET}" ] && SECRETS="$${SECRETS},OPENROUTER_KEY_SECRET_NAME=${_OPENROUTER_SECRET}:latest"
-        [ -n "${_PERPLEXITY_SECRET}" ] && SECRETS="$${SECRETS},PERPLEXITY_SECRET_NAME=${_PERPLEXITY_SECRET}:latest"
+        [ -n "${_PERPLEXITY_SECRET}" ] && SECRETS="$${SECRETS},PERPLEXITY_KEY_SECRET_NAME=${_PERPLEXITY_SECRET}:latest"
         
         gcloud run deploy ${_SERVICE_NAME} \
           --image ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/${_SERVICE_NAME}:latest \

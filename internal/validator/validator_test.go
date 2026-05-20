@@ -170,33 +170,35 @@ func TestMiddleware_BodyAtLimit(t *testing.T) {
 	}
 }
 
-func TestMiddleware_HealthCheckBypass(t *testing.T) {
+func TestMiddleware_NonChatRoutesBypass(t *testing.T) {
 	handler := Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	req := httptest.NewRequest("GET", "/health", nil)
-	rr := httptest.NewRecorder()
-
-	handler.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Errorf("Expected status 200, got %d", rr.Code)
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		body   string
+	}{
+		{name: "health", method: "GET", path: "/health"},
+		{name: "admin", method: "GET", path: "/admin/dashboard"},
+		{name: "api config get", method: "GET", path: "/api/config"},
+		{name: "api config post", method: "POST", path: "/api/config", body: `{"perplexity_enabled":false}`},
+		{name: "not found route", method: "GET", path: "/unknown"},
 	}
-}
 
-func TestMiddleware_AdminRouteBypass(t *testing.T) {
-	handler := Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
+			rr := httptest.NewRecorder()
 
-	req := httptest.NewRequest("GET", "/admin/dashboard", nil)
-	rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, req)
 
-	handler.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Errorf("Expected status 200, got %d", rr.Code)
+			if rr.Code != http.StatusOK {
+				t.Errorf("Expected status 200, got %d", rr.Code)
+			}
+		})
 	}
 }
 
@@ -298,4 +300,3 @@ func TestMiddleware_UnicodeMessage(t *testing.T) {
 		t.Errorf("Expected status 200, got %d", rr.Code)
 	}
 }
-

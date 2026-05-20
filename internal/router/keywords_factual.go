@@ -34,6 +34,9 @@ func init() {
 		"currículo", "histórico", "registro", "documento", "certidão", "diploma", "certificado",
 		"comprovante", "recibo", "nota fiscal", "contrato", "acordo", "tratado", "lei",
 		"norma", "regra", "regulamento", "estatuto", "código", "manual", "guia", "tutorial",
+		"servidor público", "servidora pública", "funcionário público", "funcionária pública",
+		"redução de jornada", "jornada de trabalho", "direito administrativo", "estatuto dos servidores",
+		"lei distrital", "lei complementar", "distrito federal", "gdf", "licença médica", "benefício funcional",
 
 		// Calendar & Time
 		"janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",

@@ -37,6 +37,11 @@ const (
 	defaultClaudeHaikuModel    = "claude-haiku-4-5-20251001"
 	openRouterClaudeHaikuModel = "openrouter/anthropic/claude-haiku-4.5"
 	openAIFallbackModel        = "gpt-4o-mini"
+	defaultClaudeMessagesURL   = "https://api.anthropic.com/v1/messages"
+	defaultPerplexitySearchURL = "https://api.perplexity.ai/search"
+	// Anthropic requires max_tokens on Messages requests. Keep this high enough
+	// to avoid app-side truncation while still satisfying the provider contract.
+	claudeResponseMaxTokens = 4096
 )
 
 type ChatRequest struct {
@@ -62,6 +67,9 @@ type Server struct {
 	claudeAPIKey     string // Anthropic Claude API key for fast responses
 	apiKeySecret     string
 	logger           *logging.Logger
+
+	claudeMessagesURL   string
+	perplexitySearchURL string
 }
 
 // ClaudeRequest represents the request body for Claude Messages API
@@ -149,11 +157,15 @@ type WebSearchTool struct {
 
 // ResponsesAPIResponse represents the response from Responses API
 type ResponsesAPIResponse struct {
-	ID         string                   `json:"id"`
-	OutputText string                   `json:"output_text"`
-	Output     interface{}              `json:"output,omitempty"` // Can be string or array of items
-	Items      []map[string]interface{} `json:"items,omitempty"`
-	Error      *struct {
+	ID                string                   `json:"id"`
+	Status            string                   `json:"status,omitempty"`
+	OutputText        string                   `json:"output_text"`
+	Output            interface{}              `json:"output,omitempty"` // Can be string or array of items
+	Items             []map[string]interface{} `json:"items,omitempty"`
+	IncompleteDetails *struct {
+		Reason string `json:"reason"`
+	} `json:"incomplete_details,omitempty"`
+	Error *struct {
 		Message string `json:"message"`
 		Type    string `json:"type"`
 	} `json:"error,omitempty"`
@@ -181,9 +193,10 @@ type OpenRouterChatResponse struct {
 	Model   string `json:"model"`
 	Choices []struct {
 		Message struct {
-			Role    string `json:"role"`
-			Content string `json:"content"`
+			Role    string          `json:"role"`
+			Content json.RawMessage `json:"content"`
 		} `json:"message"`
+		FinishReason string `json:"finish_reason,omitempty"`
 	} `json:"choices"`
 	Error *struct {
 		Message string      `json:"message"`
@@ -503,7 +516,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	// Call the configured AI provider with the selected model and tools
 	// IMPORTANT: Apple Shortcuts has ~30s internal timeout. We use 25s to leave buffer
 	// for network latency and response processing on the client side.
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer cancel()
 
 	// Get current date/time in Brazil timezone for context
@@ -595,8 +608,8 @@ func (s *Server) logRequest(requestID string, r *http.Request, rawInput, sanitiz
 
 var (
 	// Compile regular expressions once at package level
-	markdownLinkInParensRegexp = regexp.MustCompile(`\(\[[^\]]+\]\([^\)]+\)\)`)
-	markdownLinkRegexp         = regexp.MustCompile(`\[[^\]]+\]\([^\)]+\)`)
+	markdownLinkInParensRegexp = regexp.MustCompile(`\(\[([^\]]+)\]\([^\)]+\)\)`)
+	markdownLinkRegexp         = regexp.MustCompile(`\[([^\]]+)\]\([^\)]+\)`)
 	urlRegexp                  = regexp.MustCompile(`(?i)(https?://|www\.)[^\s]+`)
 	domainRegexp               = regexp.MustCompile(`(?i)\b[a-z0-9]+([.-][a-z0-9]+)*\.(com|br|org|net|gov|edu|io|co|info|me|tv|xyz)[^\s]*`)
 	spaceRegexp                = regexp.MustCompile(`\s+`)
@@ -605,11 +618,9 @@ var (
 // removeURLsFromText removes any URLs, web addresses, or domain names from text
 // This is a safety net to ensure no URLs make it to the voice interface
 func removeURLsFromText(text string) string {
-	// Remove markdown links: [text](url) or ([text](url))
-	// First, remove markdown links wrapped in parentheses: ([text](url))
-	text = markdownLinkInParensRegexp.ReplaceAllString(text, "")
-	// Then remove standard markdown links: [text](url)
-	text = markdownLinkRegexp.ReplaceAllString(text, "")
+	// Remove markdown URLs while preserving the spoken source label.
+	text = markdownLinkInParensRegexp.ReplaceAllString(text, "$1")
+	text = markdownLinkRegexp.ReplaceAllString(text, "$1")
 
 	// Remove URLs (http://, https://, www.)
 	text = urlRegexp.ReplaceAllString(text, "")
@@ -781,13 +792,7 @@ func (s *Server) performPerplexitySearch(ctx context.Context, query string) ([]P
 		MaxTokensPerPage: 1024, // Default token limit per page
 	}
 
-	// Determine language filter based on query (Portuguese for Brazilian queries)
-	// Simple heuristic: if query contains Portuguese words, use Portuguese filter
-	if strings.Contains(strings.ToLower(query), "hoje") ||
-		strings.Contains(strings.ToLower(query), "notícias") ||
-		strings.Contains(strings.ToLower(query), "brasil") {
-		reqBody.SearchLanguageFilter = []string{"pt"}
-	}
+	reqBody.SearchLanguageFilter = perplexitySearchLanguageFilter(query)
 
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
@@ -795,7 +800,7 @@ func (s *Server) performPerplexitySearch(ctx context.Context, query string) ([]P
 	}
 
 	// Create HTTP request to Perplexity Search API
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", "https://api.perplexity.ai/search", bytes.NewBuffer(jsonData))
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", s.perplexityEndpoint(), bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Perplexity request: %w", err)
 	}
@@ -834,6 +839,27 @@ func (s *Server) performPerplexitySearch(ctx context.Context, query string) ([]P
 	return apiResp.Results, nil
 }
 
+func (s *Server) perplexityEndpoint() string {
+	if s.perplexitySearchURL != "" {
+		return s.perplexitySearchURL
+	}
+	return defaultPerplexitySearchURL
+}
+
+func perplexitySearchLanguageFilter(query string) []string {
+	normalized := router.Normalize(query)
+	portugueseSignals := []string{
+		"hoje", "notic", "brasil", "qual", "quais", "regra", "lei",
+		"servidor", "funcionario", "publico", "distrito federal", "jornada",
+	}
+	for _, signal := range portugueseSignals {
+		if strings.Contains(normalized, signal) {
+			return []string{"pt"}
+		}
+	}
+	return nil
+}
+
 // formatPerplexityResults formats Perplexity search results into a readable context string
 func formatPerplexityResults(results []PerplexitySearchResult) string {
 	if len(results) == 0 {
@@ -857,6 +883,14 @@ func formatPerplexityResults(results []PerplexitySearchResult) string {
 	return builder.String()
 }
 
+func withSearchEvidence(instructions string, results []PerplexitySearchResult) (string, bool) {
+	formattedResults := formatPerplexityResults(results)
+	if formattedResults == "" {
+		return instructions, false
+	}
+	return fmt.Sprintf("%s\n\n%s", instructions, formattedResults), true
+}
+
 // createResponse routes to the appropriate AI provider.
 // Claude Haiku is preferred for speed-critical CarPlay scenarios, with
 // OpenRouter and OpenAI used as configured fallbacks.
@@ -870,36 +904,23 @@ func (s *Server) createResponse(ctx context.Context, route RouteDecision, instru
 		return s.makeOpenRouterRequest(ctx, route.Model, instructions, input, route.WebSearch)
 	}
 
-	// Check if this is a Claude model
 	if isClaudeModel(route.Model) && s.claudeAPIKey != "" {
-		// CRITICAL: If web search is needed, use Claude's native search first to get real-time data
-		// We should NEVER rely on training data for recent information
 		if route.WebSearch {
-			log.Printf("Using Claude native web_search tool for real-time data")
-			response, err := s.makeClaudeWebSearchRequest(ctx, route.Model, instructions, input)
-			if err == nil {
-				return response, nil
-			}
-			log.Printf("Claude native web_search failed: %v", err)
-
 			if config.PerplexityEnabled && s.perplexityAPIKey != "" {
-				log.Printf("Using Perplexity Search API with Claude for web search (real-time data required)")
+				log.Printf("Using Perplexity Search API before Claude for grounded factual response")
 				perplexityResults, err := s.performPerplexitySearch(ctx, input)
-				if err != nil {
-					log.Printf("Perplexity search failed: %v", err)
-					return s.makeFallbackWebSearchRequest(ctx, route, instructions, input)
-				} else {
-					// Format Perplexity results and append to instructions
-					formattedResults := formatPerplexityResults(perplexityResults)
-					if formattedResults != "" {
-						instructions = fmt.Sprintf("%s\n\n%s", instructions, formattedResults)
-						log.Printf("Perplexity results appended to Claude instructions for real-time data")
+				if err == nil {
+					if enhancedInstructions, ok := withSearchEvidence(instructions, perplexityResults); ok {
+						log.Printf("Perplexity evidence appended to Claude instructions")
+						return s.makeClaudeRequest(ctx, route.Model, enhancedInstructions, input)
 					}
+					log.Printf("Perplexity returned no usable evidence; falling back to Claude native web_search")
+				} else {
+					log.Printf("Perplexity search failed: %v; falling back to Claude native web_search", err)
 				}
-			} else {
-				log.Printf("Web search needed but Perplexity is disabled or not configured")
-				return s.makeFallbackWebSearchRequest(ctx, route, instructions, input)
 			}
+			log.Printf("Using Claude native web_search tool for grounded response")
+			return s.makeClaudeWebSearchRequest(ctx, route.Model, instructions, input)
 		}
 		log.Printf("Using Claude API for fast response: model=%s", route.Model)
 		return s.makeClaudeRequest(ctx, route.Model, instructions, input)
@@ -923,11 +944,9 @@ func (s *Server) createResponse(ctx context.Context, route RouteDecision, instru
 				return s.makeOpenAIWebSearchRequest(ctx, route, instructions, input)
 			}
 
-			// Format Perplexity results and append to instructions
-			formattedResults := formatPerplexityResults(perplexityResults)
 			enhancedInstructions := instructions
-			if formattedResults != "" {
-				enhancedInstructions = fmt.Sprintf("%s\n\n%s", instructions, formattedResults)
+			if withEvidence, ok := withSearchEvidence(instructions, perplexityResults); ok {
+				enhancedInstructions = withEvidence
 			}
 
 			// Create request without web_search tool (using Perplexity results in instructions)
@@ -1048,7 +1067,7 @@ func (s *Server) makeOpenRouterRequest(ctx context.Context, model, systemPrompt,
 		return "", fmt.Errorf("failed to marshal OpenRouter request: %w", err)
 	}
 
-	log.Printf("OpenRouter request: model=%s, max_tokens=%d, web_search=%v", reqBody.Model, reqBody.MaxTokens, webSearch)
+	log.Printf("OpenRouter request: model=%s, max_tokens_set=%v, web_search=%v", reqBody.Model, reqBody.MaxTokens > 0, webSearch)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", "https://openrouter.ai/api/v1/chat/completions", bytes.NewBuffer(jsonData))
 	if err != nil {
@@ -1091,8 +1110,11 @@ func (s *Server) makeOpenRouterRequest(ctx context.Context, model, systemPrompt,
 		return "", fmt.Errorf("OpenRouter API error: %s", apiResp.Error.Message)
 	}
 	for _, choice := range apiResp.Choices {
-		if choice.Message.Content != "" {
-			return choice.Message.Content, nil
+		if content := extractOpenRouterMessageContent(choice.Message.Content); content != "" {
+			if choice.FinishReason == "length" {
+				log.Printf("OpenRouter response finished because of provider length limit")
+			}
+			return content, nil
 		}
 	}
 
@@ -1100,10 +1122,40 @@ func (s *Server) makeOpenRouterRequest(ctx context.Context, model, systemPrompt,
 	return "", fmt.Errorf("empty response from OpenRouter")
 }
 
+func extractOpenRouterMessageContent(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		return strings.TrimSpace(text)
+	}
+
+	var contentBlocks []interface{}
+	if err := json.Unmarshal(raw, &contentBlocks); err != nil {
+		return ""
+	}
+
+	var parts []string
+	for _, block := range contentBlocks {
+		blockMap, ok := block.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if blockType, ok := blockMap["type"].(string); ok && blockType != "text" && blockType != "output_text" {
+			continue
+		}
+		if blockText, ok := blockMap["text"].(string); ok {
+			appendNonEmptyText(&parts, blockText)
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
+
 func buildOpenRouterChatRequest(model, systemPrompt, userMessage string, webSearch bool) OpenRouterChatRequest {
 	reqBody := OpenRouterChatRequest{
-		Model:     openRouterModelID(model),
-		MaxTokens: 500,
+		Model: openRouterModelID(model),
 		Messages: []OpenRouterMessage{
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: userMessage},
@@ -1213,40 +1265,59 @@ func (s *Server) makeOpenAIRequest(ctx context.Context, reqBody ResponsesAPIRequ
 		return "", fmt.Errorf("API error: %s (type: %s)", apiResp.Error.Message, apiResp.Error.Type)
 	}
 
-	// Responses API returns output as an array of items
-	// Structure: output[0].content[0].text (for message type items)
-	if apiResp.Output != nil {
-		if outputArr, ok := apiResp.Output.([]interface{}); ok {
-			for _, item := range outputArr {
-				if itemMap, ok := item.(map[string]interface{}); ok {
-					// Look for message type items
-					if itemType, ok := itemMap["type"].(string); ok && itemType == "message" {
-						// Content is an array of content items
-						if contentArr, ok := itemMap["content"].([]interface{}); ok {
-							for _, contentItem := range contentArr {
-								if contentMap, ok := contentItem.(map[string]interface{}); ok {
-									// Look for output_text type content
-									if contentType, ok := contentMap["type"].(string); ok && contentType == "output_text" {
-										if text, ok := contentMap["text"].(string); ok && text != "" {
-											return text, nil
-										}
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-		}
+	if apiResp.IncompleteDetails != nil {
+		log.Printf("OpenAI Responses API returned incomplete status: status=%s reason=%s", apiResp.Status, apiResp.IncompleteDetails.Reason)
 	}
 
-	// Fallback: try output_text field (SDK-only convenience property, may not be in raw API response)
-	if apiResp.OutputText != "" {
-		return apiResp.OutputText, nil
+	if text := extractResponsesText(apiResp); text != "" {
+		return text, nil
 	}
 
 	log.Printf("Empty response from API. Full response: %s", string(body))
 	return "", fmt.Errorf("empty response from API")
+}
+
+func extractResponsesText(apiResp ResponsesAPIResponse) string {
+	var parts []string
+	if outputArr, ok := apiResp.Output.([]interface{}); ok {
+		for _, item := range outputArr {
+			itemMap, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if itemType, ok := itemMap["type"].(string); ok && itemType != "message" {
+				continue
+			}
+			contentArr, ok := itemMap["content"].([]interface{})
+			if !ok {
+				continue
+			}
+			for _, contentItem := range contentArr {
+				contentMap, ok := contentItem.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				contentType, _ := contentMap["type"].(string)
+				if contentType != "output_text" && contentType != "text" {
+					continue
+				}
+				if text, ok := contentMap["text"].(string); ok {
+					appendNonEmptyText(&parts, text)
+				}
+			}
+		}
+	}
+	if len(parts) > 0 {
+		return strings.Join(parts, "\n\n")
+	}
+	return strings.TrimSpace(apiResp.OutputText)
+}
+
+func appendNonEmptyText(parts *[]string, text string) {
+	text = strings.TrimSpace(text)
+	if text != "" {
+		*parts = append(*parts, text)
+	}
 }
 
 // makeClaudeRequest makes a request to Claude Messages API (Anthropic)
@@ -1282,7 +1353,7 @@ func (s *Server) makeClaudeRequestWithTools(ctx context.Context, model, systemPr
 	log.Printf("Claude API request: model=%s, max_tokens=%d, has_tools=%v", model, reqBody.MaxTokens, len(reqBody.Tools) > 0)
 
 	// Create HTTP request to Claude Messages API
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", "https://api.anthropic.com/v1/messages", bytes.NewBuffer(jsonData))
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", s.claudeEndpoint(), bytes.NewBuffer(jsonData))
 	if err != nil {
 		return "", fmt.Errorf("failed to create Claude request: %w", err)
 	}
@@ -1336,21 +1407,57 @@ func (s *Server) makeClaudeRequestWithTools(ctx context.Context, model, systemPr
 		return "", err
 	}
 
-	// Extract text from response content
-	for _, content := range claudeResp.Content {
-		if content.Type == "text" && content.Text != "" {
-			return content.Text, nil
-		}
+	if claudeResp.StopReason == "max_tokens" {
+		log.Printf("Claude response stopped because max_tokens was reached")
+	}
+
+	if text := extractClaudeText(claudeResp); text != "" {
+		return text, nil
 	}
 
 	log.Printf("Empty response from Claude. Full response: %s", string(body))
 	return "", fmt.Errorf("empty response from Claude")
 }
 
+func extractClaudeText(resp ClaudeResponse) string {
+	startAt := 0
+	for i, content := range resp.Content {
+		if content.Type != "text" {
+			startAt = i + 1
+		}
+	}
+
+	var builder strings.Builder
+	for _, content := range resp.Content[startAt:] {
+		if content.Type == "text" && strings.TrimSpace(content.Text) != "" {
+			builder.WriteString(content.Text)
+		}
+	}
+	if text := strings.TrimSpace(builder.String()); text != "" {
+		return text
+	}
+	if startAt > 0 {
+		builder.Reset()
+		for _, content := range resp.Content {
+			if content.Type == "text" && strings.TrimSpace(content.Text) != "" {
+				builder.WriteString(content.Text)
+			}
+		}
+	}
+	return strings.TrimSpace(builder.String())
+}
+
+func (s *Server) claudeEndpoint() string {
+	if s.claudeMessagesURL != "" {
+		return s.claudeMessagesURL
+	}
+	return defaultClaudeMessagesURL
+}
+
 func buildClaudeRequest(model, systemPrompt, userMessage string, tools []ClaudeTool) ClaudeRequest {
 	return ClaudeRequest{
 		Model:     model,
-		MaxTokens: 500, // Keep responses concise for CarPlay
+		MaxTokens: claudeResponseMaxTokens,
 		System: []ClaudeSystemBlock{
 			{
 				Type: "text",
@@ -1373,21 +1480,46 @@ func claudeWebSearchError(resp ClaudeResponse) error {
 			continue
 		}
 
-		var result struct {
-			Type      string `json:"type"`
-			ErrorCode string `json:"error_code"`
-		}
-		if err := json.Unmarshal(block.Content, &result); err != nil {
+		errorCode, ok := claudeWebSearchErrorCode(block.Content)
+		if !ok {
 			continue
 		}
-		if result.Type == "web_search_tool_result_error" {
-			if result.ErrorCode == "" {
-				result.ErrorCode = "unknown"
-			}
-			return fmt.Errorf("Claude web search tool error: %s", result.ErrorCode)
+		if errorCode == "" {
+			errorCode = "unknown"
 		}
+		return fmt.Errorf("Claude web search tool error: %s", errorCode)
 	}
 	return nil
+}
+
+func claudeWebSearchErrorCode(raw json.RawMessage) (string, bool) {
+	var payload interface{}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return "", false
+	}
+	return findClaudeWebSearchErrorCode(payload)
+}
+
+func findClaudeWebSearchErrorCode(value interface{}) (string, bool) {
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		if resultType, _ := typed["type"].(string); resultType == "web_search_tool_result_error" {
+			code, _ := typed["error_code"].(string)
+			return code, true
+		}
+		for _, nested := range typed {
+			if code, ok := findClaudeWebSearchErrorCode(nested); ok {
+				return code, true
+			}
+		}
+	case []interface{}:
+		for _, item := range typed {
+			if code, ok := findClaudeWebSearchErrorCode(item); ok {
+				return code, true
+			}
+		}
+	}
+	return "", false
 }
 
 // isClaudeModel checks if the model name is a Claude model

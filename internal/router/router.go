@@ -243,13 +243,7 @@ func Route(question string) RouteDecision {
 		}
 	}
 
-	// Determine web search requirement
-	switch bestCategory {
-	case CategoryWebSearch, CategoryFactual:
-		webSearch = true
-	default:
-		webSearch = false
-	}
+	webSearch = categoryUsesWebSearch(bestCategory)
 
 	// If web search is needed, ensure the model supports it
 	if webSearch {
@@ -258,13 +252,10 @@ func Route(question string) RouteDecision {
 		supportsWebSearch := modelsWithWebSearch[model]
 		isGPT5 := strings.HasPrefix(model, "gpt-5")
 
-		// Claude models support web search via Perplexity integration (handled in main.go)
-		// Only allow if Perplexity is enabled in config
 		if isOpenRouter {
 			// OpenRouter models use OpenRouter's server-side web search tool in main.go.
-		} else if isClaude && config.PerplexityEnabled {
-			// Claude + native/Perplexity search is supported, no fallback needed
-			// Reasoning effort not applicable to Claude
+		} else if isClaude {
+			// Claude uses native web_search in main.go, with Perplexity/OpenAI fallbacks there if needed.
 		} else if !supportsWebSearch {
 			log.Printf("Model %s does not support web search, using fallback: %s", model, webSearchFallbackModel)
 			model = webSearchFallbackModel
@@ -281,4 +272,8 @@ func Route(question string) RouteDecision {
 		WebSearch:       webSearch,
 		ReasoningEffort: reasoningEffort,
 	}
+}
+
+func categoryUsesWebSearch(category Category) bool {
+	return category == CategoryWebSearch || category == CategoryFactual
 }

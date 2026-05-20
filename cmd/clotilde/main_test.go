@@ -541,14 +541,91 @@ func TestBuildOpenAIWebSearchRequest_KeepsOpenAIModel(t *testing.T) {
 	}
 }
 
+func TestCreateResponse_ClaudeUsesPerplexityEvidenceBeforeNativeSearch(t *testing.T) {
+	config := admin.GetConfig()
+	defer admin.SetConfig(config)
+
+	if err := admin.SetConfig(admin.RuntimeConfig{
+		BaseSystemPrompt:  clotildeBaseSystemPromptTemplate,
+		StandardModel:     defaultClaudeHaikuModel,
+		PremiumModel:      defaultClaudeHaikuModel,
+		PerplexityEnabled: true,
+	}); err != nil {
+		t.Fatalf("failed to set config: %v", err)
+	}
+
+	perplexityCalled := false
+	perplexityServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		perplexityCalled = true
+		if r.URL.Path != "/" {
+			t.Fatalf("unexpected Perplexity path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(PerplexitySearchResponse{
+			Results: []PerplexitySearchResult{
+				{
+					Title:   "Portal do Distrito Federal",
+					URL:     "https://www.df.gov.br/reducao-jornada",
+					Snippet: "A Lei Complementar 840/2011 rege servidores do Distrito Federal.",
+				},
+			},
+		})
+	}))
+	defer perplexityServer.Close()
+
+	claudeCalled := false
+	claudeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claudeCalled = true
+		var body map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("failed to decode Claude request: %v", err)
+		}
+		if _, hasTools := body["tools"]; hasTools {
+			t.Fatalf("expected evidence-first Claude request without native tools, got tools=%v", body["tools"])
+		}
+		rawBody, _ := json.Marshal(body)
+		bodyText := string(rawBody)
+		if !strings.Contains(bodyText, "Portal do Distrito Federal") || !strings.Contains(bodyText, "Lei Complementar 840/2011") {
+			t.Fatalf("expected Perplexity evidence in Claude instructions, got %s", bodyText)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ClaudeResponse{
+			Content: []ClaudeContentBlock{{Type: "text", Text: "Resposta baseada no contexto anexado."}},
+		})
+	}))
+	defer claudeServer.Close()
+
+	server := &Server{
+		claudeAPIKey:        "test-claude",
+		perplexityAPIKey:    "test-perplexity",
+		logger:              logging.NewLogger(4),
+		claudeMessagesURL:   claudeServer.URL,
+		perplexitySearchURL: perplexityServer.URL,
+	}
+
+	response, err := server.createResponse(t.Context(), RouteDecision{
+		Model:     defaultClaudeHaikuModel,
+		WebSearch: true,
+	}, "instructions", "Qual as regras de redução de jornada para funcionários públicos do Distrito Federal?")
+	if err != nil {
+		t.Fatalf("createResponse failed: %v", err)
+	}
+	if response != "Resposta baseada no contexto anexado." {
+		t.Fatalf("unexpected response: %q", response)
+	}
+	if !perplexityCalled || !claudeCalled {
+		t.Fatalf("expected Perplexity and Claude to be called, perplexity=%v claude=%v", perplexityCalled, claudeCalled)
+	}
+}
+
 func TestBuildOpenRouterChatRequest_IncludesWebSearchTool(t *testing.T) {
 	reqBody := buildOpenRouterChatRequest(openRouterClaudeHaikuModel, "instructions", "latest news", true)
 
 	if reqBody.Model != "anthropic/claude-haiku-4.5" {
 		t.Fatalf("expected OpenRouter model slug to be stripped, got %q", reqBody.Model)
 	}
-	if reqBody.MaxTokens != 500 {
-		t.Fatalf("expected max_tokens=500, got %d", reqBody.MaxTokens)
+	if reqBody.MaxTokens != 0 {
+		t.Fatalf("expected max_tokens to be omitted for OpenRouter, got %d", reqBody.MaxTokens)
 	}
 	if len(reqBody.Messages) != 2 {
 		t.Fatalf("expected system and user messages, got %d", len(reqBody.Messages))
@@ -573,6 +650,9 @@ func TestBuildClaudeRequest_IncludesNativeWebSearchTool(t *testing.T) {
 
 	if reqBody.Model != "claude-haiku-4-5-20251001" {
 		t.Fatalf("expected Claude model to be preserved, got %q", reqBody.Model)
+	}
+	if reqBody.MaxTokens != claudeResponseMaxTokens {
+		t.Fatalf("expected max_tokens=%d, got %d", claudeResponseMaxTokens, reqBody.MaxTokens)
 	}
 	systemBlocks, ok := reqBody.System.([]ClaudeSystemBlock)
 	if !ok {
@@ -617,6 +697,25 @@ func TestClaudeWebSearchError_DetectsToolError(t *testing.T) {
 	}
 }
 
+func TestClaudeWebSearchError_DetectsArrayToolError(t *testing.T) {
+	resp := ClaudeResponse{
+		Content: []ClaudeContentBlock{
+			{
+				Type:    "web_search_tool_result",
+				Content: json.RawMessage(`[{"type":"web_search_tool_result_error","error_code":"max_uses_exceeded"}]`),
+			},
+		},
+	}
+
+	err := claudeWebSearchError(resp)
+	if err == nil {
+		t.Fatalf("expected Claude web search error")
+	}
+	if !strings.Contains(err.Error(), "max_uses_exceeded") {
+		t.Fatalf("expected error code in error, got %v", err)
+	}
+}
+
 func TestClaudeWebSearchError_IgnoresTextResponse(t *testing.T) {
 	resp := ClaudeResponse{
 		Content: []ClaudeContentBlock{
@@ -627,6 +726,209 @@ func TestClaudeWebSearchError_IgnoresTextResponse(t *testing.T) {
 	if err := claudeWebSearchError(resp); err != nil {
 		t.Fatalf("expected no web search error, got %v", err)
 	}
+}
+
+func TestRemoveURLsFromText_PreservesMarkdownLinkLabels(t *testing.T) {
+	input := "Segundo [Secretaria de Economia do DF](https://www.economia.df.gov.br), a regra consta no portal."
+	got := removeURLsFromText(input)
+	want := "Segundo Secretaria de Economia do DF, a regra consta no portal."
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
+func TestRemoveURLsFromText_RemovesBareURLsAndDomains(t *testing.T) {
+	input := "Veja em https://example.com/regra e consulte economia.df.gov.br para detalhes."
+	got := removeURLsFromText(input)
+	if strings.Contains(got, "http") || strings.Contains(got, "example.com") || strings.Contains(got, "economia.df.gov.br") {
+		t.Fatalf("expected URLs/domains to be removed, got %q", got)
+	}
+}
+
+func TestPerplexitySearchLanguageFilter_PortugueseLegalQuery(t *testing.T) {
+	got := perplexitySearchLanguageFilter("Qual as regras de redução de jornada para funcionários públicos do Distrito Federal?")
+	if len(got) != 1 || got[0] != "pt" {
+		t.Fatalf("expected Portuguese language filter, got %+v", got)
+	}
+}
+
+func TestPerplexitySearchLanguageFilter_GlobalEnglishQuery(t *testing.T) {
+	got := perplexitySearchLanguageFilter("latest Tesla earnings call")
+	if got != nil {
+		t.Fatalf("expected no language filter, got %+v", got)
+	}
+}
+
+func TestExtractOpenRouterMessageContent_AllowsStringContent(t *testing.T) {
+	got := extractOpenRouterMessageContent(json.RawMessage(`"Resposta direta."`))
+	if got != "Resposta direta." {
+		t.Fatalf("expected string content, got %q", got)
+	}
+}
+
+func TestExtractOpenRouterMessageContent_AllowsStructuredContent(t *testing.T) {
+	got := extractOpenRouterMessageContent(json.RawMessage(`[
+		{"type":"text","text":"Primeira parte."},
+		{"type":"citation","url":"https://example.com"},
+		{"type":"text","text":"Segunda parte."}
+	]`))
+	want := "Primeira parte.\n\nSegunda parte."
+	if got != want {
+		t.Fatalf("expected structured content %q, got %q", want, got)
+	}
+}
+
+func TestExtractResponsesText_JoinsMultipleOutputBlocks(t *testing.T) {
+	apiResp := ResponsesAPIResponse{
+		Output: []interface{}{
+			map[string]interface{}{"type": "web_search_call", "status": "completed"},
+			map[string]interface{}{
+				"type": "message",
+				"content": []interface{}{
+					map[string]interface{}{"type": "output_text", "text": "Primeira parte."},
+				},
+			},
+			map[string]interface{}{
+				"type": "message",
+				"content": []interface{}{
+					map[string]interface{}{"type": "output_text", "text": "Segunda parte."},
+				},
+			},
+		},
+	}
+
+	got := extractResponsesText(apiResp)
+	want := "Primeira parte.\n\nSegunda parte."
+	if got != want {
+		t.Fatalf("expected joined response %q, got %q", want, got)
+	}
+}
+
+func TestExtractClaudeText_PrefersTextAfterToolResults(t *testing.T) {
+	resp := ClaudeResponse{
+		Content: []ClaudeContentBlock{
+			{Type: "text", Text: "Vou buscar."},
+			{Type: "server_tool_use"},
+			{Type: "web_search_tool_result", Content: json.RawMessage(`{"type":"web_search_tool_result"}`)},
+			{Type: "text", Text: "Resposta final. "},
+			{Type: "text", Text: "Complemento final."},
+		},
+	}
+
+	got := extractClaudeText(resp)
+	want := "Resposta final. Complemento final."
+	if got != want {
+		t.Fatalf("expected joined response %q, got %q", want, got)
+	}
+}
+
+func TestLiveOpenAIProviderResponseFormat(t *testing.T) {
+	if os.Getenv("RUN_LIVE_PROVIDER_TESTS") != "1" {
+		t.Skip("set RUN_LIVE_PROVIDER_TESTS=1 to call the external provider")
+	}
+	openAIKey := os.Getenv("OPENAI_KEY_SECRET_NAME")
+	if openAIKey == "" {
+		t.Skip("OPENAI_KEY_SECRET_NAME is not set")
+	}
+
+	admin.SetDefaultConfig(clotildeBaseSystemPromptTemplate)
+	admin.SetDefaultCategoryPrompts(map[string]string{
+		"web_search":   categoryPromptWebSearch,
+		"complex":      categoryPromptComplex,
+		"factual":      categoryPromptFactual,
+		"mathematical": categoryPromptMathematical,
+		"creative":     categoryPromptCreative,
+	})
+	if err := admin.SetConfig(admin.RuntimeConfig{
+		BaseSystemPrompt:  clotildeBaseSystemPromptTemplate,
+		StandardModel:     openAIFallbackModel,
+		PremiumModel:      openAIFallbackModel,
+		PerplexityEnabled: false,
+	}); err != nil {
+		t.Fatalf("failed to configure live provider test: %v", err)
+	}
+
+	input := "Qual as regras de redução de jornada para funcionários públicos do Distrito Federal?"
+	route := router.Route(input)
+	if route.Category != router.CategoryFactual || !route.WebSearch {
+		t.Fatalf("expected factual route with web search, got category=%s web_search=%v", route.Category, route.WebSearch)
+	}
+
+	server := &Server{
+		openaiAPIKey: openAIKey,
+		logger:       logging.NewLogger(4),
+	}
+	prompt := server.buildSystemPrompt(admin.GetConfig(), route.Category, "19 de maio de 2026, 21:30 (horário de Brasília)")
+	response, err := server.createResponse(t.Context(), RouteDecision{
+		Model:           route.Model,
+		WebSearch:       route.WebSearch,
+		ReasoningEffort: route.ReasoningEffort,
+	}, prompt, input)
+	if err != nil {
+		t.Fatalf("live provider request failed: %v", err)
+	}
+	if strings.TrimSpace(response) == "" {
+		t.Fatalf("live provider response was empty")
+	}
+	t.Logf("live provider response chars=%d preview=%q", len(response), truncateForTest(response, 240))
+}
+
+func TestLiveClaudeProviderResponseFormat(t *testing.T) {
+	if os.Getenv("RUN_LIVE_PROVIDER_TESTS") != "1" {
+		t.Skip("set RUN_LIVE_PROVIDER_TESTS=1 to call the external provider")
+	}
+	claudeKey := os.Getenv("CLAUDE_KEY_SECRET_NAME")
+	if claudeKey == "" {
+		t.Skip("CLAUDE_KEY_SECRET_NAME is not set")
+	}
+
+	admin.SetDefaultConfig(clotildeBaseSystemPromptTemplate)
+	admin.SetDefaultCategoryPrompts(map[string]string{
+		"web_search":   categoryPromptWebSearch,
+		"complex":      categoryPromptComplex,
+		"factual":      categoryPromptFactual,
+		"mathematical": categoryPromptMathematical,
+		"creative":     categoryPromptCreative,
+	})
+	if err := admin.SetConfig(admin.RuntimeConfig{
+		BaseSystemPrompt:  clotildeBaseSystemPromptTemplate,
+		StandardModel:     defaultClaudeHaikuModel,
+		PremiumModel:      defaultClaudeHaikuModel,
+		PerplexityEnabled: false,
+	}); err != nil {
+		t.Fatalf("failed to configure live provider test: %v", err)
+	}
+
+	input := "Qual as regras de redução de jornada para funcionários públicos do Distrito Federal?"
+	route := router.Route(input)
+	if route.Category != router.CategoryFactual || !route.WebSearch {
+		t.Fatalf("expected factual route with web search, got category=%s web_search=%v", route.Category, route.WebSearch)
+	}
+
+	server := &Server{
+		claudeAPIKey: claudeKey,
+		logger:       logging.NewLogger(4),
+	}
+	prompt := server.buildSystemPrompt(admin.GetConfig(), route.Category, "19 de maio de 2026, 21:30 (horário de Brasília)")
+	response, err := server.createResponse(t.Context(), RouteDecision{
+		Model:           route.Model,
+		WebSearch:       route.WebSearch,
+		ReasoningEffort: route.ReasoningEffort,
+	}, prompt, input)
+	if err != nil {
+		t.Fatalf("live provider request failed: %v", err)
+	}
+	if strings.TrimSpace(response) == "" {
+		t.Fatalf("live provider response was empty")
+	}
+	t.Logf("live provider response chars=%d preview=%q", len(response), truncateForTest(response, 240))
+}
+
+func truncateForTest(text string, limit int) string {
+	if len(text) <= limit {
+		return text
+	}
+	return text[:limit] + "..."
 }
 
 // TestCategoryPrompts_WebSearch tests web search prompt edge cases
@@ -643,6 +945,8 @@ func TestCategoryPrompts_WebSearch(t *testing.T) {
 		"fontes com nomes específicos",
 		"Inclua data e hora",
 		"informações conflitantes",
+		"contexto de busca anexado",
+		"limite da confirmação",
 	}
 
 	for _, check := range webSearchChecks {
@@ -688,7 +992,8 @@ func TestCategoryPrompts_Factual(t *testing.T) {
 		"Foque em precisão",
 		"Use web search para fatos factuais",
 		"Não use seu knowledge cutoff",
-		"não encontrou confirmação atual",
+		"contexto de busca anexado",
+		"preencher lacunas com conhecimento de memória",
 	}
 
 	for _, check := range factualChecks {
