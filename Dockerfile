@@ -36,6 +36,7 @@ WORKDIR /app
 
 # Copy binary from builder
 COPY --from=builder /app/clotilde /app/clotilde
+COPY harness /app/harness
 
 # Change ownership to non-root user
 RUN chown -R appuser:appuser /app

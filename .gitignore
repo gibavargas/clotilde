@@ -48,6 +48,8 @@ temp/
 
 # Python test files (may contain secret references)
 *.py
+!harness/*.py
+__pycache__/
 
 # Sensitive files with API keys and service URLs
 # Note: These files now contain placeholders, but keeping them excluded for safety

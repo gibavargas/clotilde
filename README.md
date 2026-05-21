@@ -300,8 +300,9 @@ Clotilde can ground time-sensitive answers through provider-native search or thr
 
 1. Claude direct API uses Claude's native `web_search_20250305` tool when configured.
 2. Perplexity can be enabled as an explicit search-results provider.
-3. OpenAI Responses falls back to native `web_search` when an OpenAI key is configured.
-4. OpenRouter falls back to the `openrouter:web_search` server tool when an OpenRouter key is configured.
+3. An optional Camoufox browser harness can render Perplexity result pages when snippets look blocked or JavaScript-gated.
+4. OpenAI Responses falls back to native `web_search` when an OpenAI key is configured.
+5. OpenRouter falls back to the `openrouter:web_search` server tool when an OpenRouter key is configured.
 
 Perplexity is useful when you want search results formatted into the prompt before generation. When enabled, Perplexity provides web search results that are formatted and included in the system prompt for the selected model.
 
@@ -311,13 +312,14 @@ Perplexity is useful when you want search results formatted into the prompt befo
 - **Automatic Fallback**: Falls back to OpenAI or OpenRouter web search if Perplexity fails and those keys are configured
 - **Language Filtering**: Automatically filters results by language (Portuguese for Brazilian queries)
 - **Result Formatting**: Search results are formatted and explained in the system prompt
+- **Optional Browser Rendering**: Uses a configured Camoufox runner only when search snippets suggest bot/JavaScript blocking, or always when explicitly configured
 
 #### Setup
 
 1. **Create Perplexity API Key Secret**:
    ```bash
    export PERPLEXITY_SECRET="my-perplexity-key-$(openssl rand -hex 4)"
-   echo -n "pplx-YOUR_API_KEY_HERE" | gcloud secrets create $PERPLEXITY_SECRET \
+   echo -n "YOUR_PERPLEXITY_API_KEY_HERE" | gcloud secrets create $PERPLEXITY_SECRET \
        --data-file=- \
        --replication-policy="automatic"
    ```
@@ -348,6 +350,32 @@ When Perplexity is enabled and a web search query is detected:
 3. Formatted results are appended to the system prompt with explanation
 4. The selected model uses these results to generate the response
 5. If Perplexity fails, Clotilde automatically falls back to provider-native web search when OpenAI or OpenRouter is configured
+
+#### Optional Camoufox Browser Harness
+
+For pages that return thin snippets such as "enable JavaScript", "access denied", or "please verify you are not a robot", Clotilde can call an external Camoufox runner after Perplexity returns URLs. This is off by default because it adds latency and requires a browser runtime.
+
+Install the optional runner dependencies in the environment that will execute the harness:
+
+```bash
+python3 -m venv .venv-camoufox
+. .venv-camoufox/bin/activate
+pip install -r harness/requirements-camoufox.txt
+python -m camoufox fetch
+```
+
+Enable it with environment variables:
+
+```bash
+export CAMOUFOX_HARNESS_ENABLED=true
+export CAMOUFOX_HARNESS_CMD=python3
+export CAMOUFOX_HARNESS_ARGS=harness/camoufox_fetch.py
+export CAMOUFOX_HARNESS_MODE=blocked   # blocked or always
+export CAMOUFOX_HARNESS_MAX_PAGES=3
+export CAMOUFOX_HARNESS_TIMEOUT_SECONDS=12
+```
+
+The runner only opens public URLs already returned by Perplexity and extracts visible text. It does not solve CAPTCHAs, submit forms, use credentials, or click through access walls.
 
 ### Configuration API
 

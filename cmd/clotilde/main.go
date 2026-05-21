@@ -70,6 +70,7 @@ type Server struct {
 
 	claudeMessagesURL   string
 	perplexitySearchURL string
+	browserHarness      BrowserHarnessConfig
 }
 
 // ClaudeRequest represents the request body for Claude Messages API
@@ -251,6 +252,10 @@ func main() {
 		claudeAPIKey:     claudeKey,
 		apiKeySecret:     apiKeySecret,
 		logger:           logger,
+		browserHarness:   browserHarnessConfigFromEnv(),
+	}
+	if server.browserHarness.Enabled {
+		log.Printf("Browser search harness enabled: mode=%s max_pages=%d", server.browserHarness.Mode, server.browserHarness.MaxPages)
 	}
 
 	// Setup middleware chain
@@ -908,7 +913,7 @@ func (s *Server) createResponse(ctx context.Context, route RouteDecision, instru
 		if route.WebSearch {
 			if config.PerplexityEnabled && s.perplexityAPIKey != "" {
 				log.Printf("Using Perplexity Search API before Claude for grounded factual response")
-				perplexityResults, err := s.performPerplexitySearch(ctx, input)
+				perplexityResults, err := s.performSearchWithBrowserHarness(ctx, input)
 				if err == nil {
 					if enhancedInstructions, ok := withSearchEvidence(instructions, perplexityResults); ok {
 						log.Printf("Perplexity evidence appended to Claude instructions")
@@ -938,7 +943,7 @@ func (s *Server) createResponse(ctx context.Context, route RouteDecision, instru
 		if config.PerplexityEnabled && s.perplexityAPIKey != "" {
 			// Use Perplexity Search API
 			log.Printf("Using Perplexity Search API for web search")
-			perplexityResults, err := s.performPerplexitySearch(ctx, input)
+			perplexityResults, err := s.performSearchWithBrowserHarness(ctx, input)
 			if err != nil {
 				log.Printf("Perplexity search failed: %v, falling back to OpenAI web_search", err)
 				return s.makeOpenAIWebSearchRequest(ctx, route, instructions, input)

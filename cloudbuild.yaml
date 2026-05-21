@@ -32,6 +32,12 @@ steps:
         ENV_VARS="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},LOG_BUFFER_SIZE=${_LOG_BUFFER_SIZE}"
         [ -n "${_ADMIN_USER}" ] && ENV_VARS="$${ENV_VARS},ADMIN_USER=${_ADMIN_USER}"
         [ -n "${_IP_HASH_SALT}" ] && ENV_VARS="$${ENV_VARS},IP_HASH_SALT=${_IP_HASH_SALT}"
+        [ -n "${_CAMOUFOX_HARNESS_ENABLED}" ] && ENV_VARS="$${ENV_VARS},CAMOUFOX_HARNESS_ENABLED=${_CAMOUFOX_HARNESS_ENABLED}"
+        [ -n "${_CAMOUFOX_HARNESS_CMD}" ] && ENV_VARS="$${ENV_VARS},CAMOUFOX_HARNESS_CMD=${_CAMOUFOX_HARNESS_CMD}"
+        [ -n "${_CAMOUFOX_HARNESS_ARGS}" ] && ENV_VARS="$${ENV_VARS},CAMOUFOX_HARNESS_ARGS=${_CAMOUFOX_HARNESS_ARGS}"
+        [ -n "${_CAMOUFOX_HARNESS_MODE}" ] && ENV_VARS="$${ENV_VARS},CAMOUFOX_HARNESS_MODE=${_CAMOUFOX_HARNESS_MODE}"
+        [ -n "${_CAMOUFOX_HARNESS_MAX_PAGES}" ] && ENV_VARS="$${ENV_VARS},CAMOUFOX_HARNESS_MAX_PAGES=${_CAMOUFOX_HARNESS_MAX_PAGES}"
+        [ -n "${_CAMOUFOX_HARNESS_TIMEOUT_SECONDS}" ] && ENV_VARS="$${ENV_VARS},CAMOUFOX_HARNESS_TIMEOUT_SECONDS=${_CAMOUFOX_HARNESS_TIMEOUT_SECONDS}"
         
         SECRETS="API_KEY_SECRET_NAME=${_API_SECRET}:latest"
         [ -n "${_OPENAI_SECRET}" ] && SECRETS="$${SECRETS},OPENAI_KEY_SECRET_NAME=${_OPENAI_SECRET}:latest"
@@ -72,5 +78,11 @@ substitutions:
   _PERPLEXITY_SECRET: ''                     # Optional: Perplexity API key secret name
   _LOG_BUFFER_SIZE: '1000'                   # Optional: max log entries in memory
   _IP_HASH_SALT: ''                          # Optional: stable IP hash salt
+  _CAMOUFOX_HARNESS_ENABLED: ''              # Optional: true to enable external browser harness
+  _CAMOUFOX_HARNESS_CMD: ''                  # Optional: executable, for example python3
+  _CAMOUFOX_HARNESS_ARGS: ''                 # Optional: args, for example /app/harness/camoufox_fetch.py
+  _CAMOUFOX_HARNESS_MODE: ''                 # Optional: blocked or always
+  _CAMOUFOX_HARNESS_MAX_PAGES: ''            # Optional: rendered pages per search
+  _CAMOUFOX_HARNESS_TIMEOUT_SECONDS: ''      # Optional: subprocess timeout
 
 timeout: '1200s'

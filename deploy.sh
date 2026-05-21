@@ -14,6 +14,7 @@
 #   ADMIN_USER           - Admin username for dashboard (enables admin dashboard)
 #   ADMIN_SECRET         - Name of admin password secret in Secret Manager (enables admin dashboard)
 #   PERPLEXITY_SECRET_NAME - Name of Perplexity API key secret in Secret Manager (enables Perplexity Search API)
+#   CAMOUFOX_HARNESS_* - Optional external browser harness configuration (disabled by default)
 #   LOG_BUFFER_SIZE      - Max log entries in memory (default: 1000)
 #
 # Example:
@@ -66,6 +67,24 @@ IP_HASH_SALT=${IP_HASH_SALT:-$(openssl rand -hex 32)}
 ENV_VARS="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},LOG_BUFFER_SIZE=${LOG_BUFFER_SIZE},IP_HASH_SALT=${IP_HASH_SALT}"
 if [ -n "$ADMIN_USER" ]; then
     ENV_VARS="${ENV_VARS},ADMIN_USER=${ADMIN_USER}"
+fi
+if [ -n "$CAMOUFOX_HARNESS_ENABLED" ]; then
+    ENV_VARS="${ENV_VARS},CAMOUFOX_HARNESS_ENABLED=${CAMOUFOX_HARNESS_ENABLED}"
+fi
+if [ -n "$CAMOUFOX_HARNESS_CMD" ]; then
+    ENV_VARS="${ENV_VARS},CAMOUFOX_HARNESS_CMD=${CAMOUFOX_HARNESS_CMD}"
+fi
+if [ -n "$CAMOUFOX_HARNESS_ARGS" ]; then
+    ENV_VARS="${ENV_VARS},CAMOUFOX_HARNESS_ARGS=${CAMOUFOX_HARNESS_ARGS}"
+fi
+if [ -n "$CAMOUFOX_HARNESS_MODE" ]; then
+    ENV_VARS="${ENV_VARS},CAMOUFOX_HARNESS_MODE=${CAMOUFOX_HARNESS_MODE}"
+fi
+if [ -n "$CAMOUFOX_HARNESS_MAX_PAGES" ]; then
+    ENV_VARS="${ENV_VARS},CAMOUFOX_HARNESS_MAX_PAGES=${CAMOUFOX_HARNESS_MAX_PAGES}"
+fi
+if [ -n "$CAMOUFOX_HARNESS_TIMEOUT_SECONDS" ]; then
+    ENV_VARS="${ENV_VARS},CAMOUFOX_HARNESS_TIMEOUT_SECONDS=${CAMOUFOX_HARNESS_TIMEOUT_SECONDS}"
 fi
 
 # Build secrets string
