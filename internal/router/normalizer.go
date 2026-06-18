@@ -9,6 +9,8 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
+var punctuationRegexp = regexp.MustCompile(`[^a-z0-9\s]+`)
+
 // Normalize prepares text for matching by:
 // 1. Lowercasing
 // 2. Removing accents (diacritics)
@@ -22,8 +24,7 @@ func Normalize(text string) string {
 
 	// 3. Remove punctuation (keep only letters and numbers)
 	// Replace non-alphanumeric with space
-	reg := regexp.MustCompile(`[^a-z0-9\s]+`)
-	text = reg.ReplaceAllString(text, " ")
+	text = punctuationRegexp.ReplaceAllString(text, " ")
 
 	// 4. Simple Stemming (RSLP-lite)
 	// We apply a few simple rules to reduce words to their root.
