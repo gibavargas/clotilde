@@ -1,5 +1,8 @@
 # Build stage
-FROM golang:1.26-alpine@sha256:6e5de3f5b9fb7e30b8bb2ffe8dcbcbdaa2990f0f31267456eabe83f870a623be AS builder
+# Build stage runs natively on the build host's arch; the pure-Go static build
+# cross-compiles to GOARCH=amd64 below (no QEMU emulation in the toolchain).
+# Builder runs natively (arm64 on this Mac); pure-Go cross-compiles to amd64 below.
+FROM --platform=linux/arm64 golang:1.26-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache git ca-certificates tzdata
@@ -23,7 +26,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     ./cmd/clotilde
 
 # Final stage
-FROM alpine@sha256:79ff19e9084a00eece421b2523fb93e22d730e2c0e525905de047e848e56d95f
+FROM --platform=linux/amd64 alpine@sha256:79ff19e9084a00eece421b2523fb93e22d730e2c0e525905de047e848e56d95f
 
 # Install CA certificates for HTTPS
 RUN apk --no-cache add ca-certificates tzdata
