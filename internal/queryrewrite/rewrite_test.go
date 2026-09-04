@@ -54,7 +54,7 @@ func TestRewriteTemporalVariants(t *testing.T) {
 		{"hoje"}, {"ontem"}, {"recente"}, {"atual"},
 	}
 	for _, tc := range cases {
-		got := Rewrite("a votação do senado " + tc.word, now)
+		got := Rewrite("a votação do senado "+tc.word, now)
 		if !strings.Contains(got[0], "2026") {
 			t.Errorf("temporal word %q did not gain the year: %q", tc.word, got[0])
 		}

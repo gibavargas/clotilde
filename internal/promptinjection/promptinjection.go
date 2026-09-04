@@ -11,30 +11,39 @@ var injectionPatterns = []*regexp.Regexp{
 	// Direct instruction override attempts
 	regexp.MustCompile(`(?i)(ignore|disregard|forget|override|skip|bypass).*?(previous|prior|above|earlier|all).*?(instruction|prompt|directive|rule|guideline|system)`),
 	regexp.MustCompile(`(?i)(ignore|disregard|forget).*?(everything|all)`),
-	
+
 	// System prompt extraction attempts
 	regexp.MustCompile(`(?i)(show|display|output|print|reveal|tell|give).*?(system|base|initial|original).*?(prompt|instruction|directive|rule)`),
 	regexp.MustCompile(`(?i)(what|what are).*?(your|the).*?(instruction|prompt|directive|rule|guideline|system prompt)`),
 	regexp.MustCompile(`(?i)(repeat|echo|copy).*?(your|the).*?(instruction|prompt|directive|system prompt)`),
-	
+
 	// Role/jailbreak attempts
 	regexp.MustCompile(`(?i)(you are|act as|pretend|roleplay|simulate).*?(developer|admin|root|system|assistant|ai|gpt)`),
 	regexp.MustCompile(`(?i)(new instruction|new prompt|new directive|new rule)`),
-	
+
 	// Encoding/obfuscation attempts
 	regexp.MustCompile(`(?i)(base64|hex|decode|encode).*?(instruction|prompt|system)`),
-	
+
 	// Instruction injection markers
 	regexp.MustCompile(`(?i)(<\|.*?\|>|\[INST\]|\[/INST\]|### Instruction|### System)`),
-	
+
 	// Attempts to break out of context
 	regexp.MustCompile(`(?i)(ignore.*?above|disregard.*?above|forget.*?above)`),
+
+	// Portuguese (the product's user language)
+	regexp.MustCompile(`(?i)(desconsidere?|desobede[çc]a|ignore|esque[çc]a|apague).*?(todas?\s+(as\s+)?|o\s+|as\s+)?(instru[çc][õo]es|instru[çc][ãõo]|prompt|diretrizes?|regras?|sistema)`),
+	regexp.MustCompile(`(?i)(revele|mostre|imprima|repita|diga|copie).*?(seu\s+|o\s+|a\s+)?(prompt(\s+do\s+sistema)?|instru[çc][õo]es(\s+do\s+sistema)?|diretrizes?)`),
+	regexp.MustCompile(`(?i)(finja|aja|virou|agora [ée] você|você agora|vire).*?(que\s+)?(um|uma|o|a)?\s*(desenvolvedor|admin|root|sistema|assistente|ia|gpt)`),
+	regexp.MustCompile(`(?i)(nova|novo)\s+(instru[çc][ãõo]|instru[çc][õo]es|prompt|diretriz|regra)`),
+	regexp.MustCompile(`(?i)(que|quais).{0,20}(suas?|as).{0,10}(instru[çc][õo]es|diretrizes|regras)`),
 }
 
 // SuspiciousKeywords are individual words that might indicate injection attempts
 var suspiciousKeywords = []string{
 	"jailbreak", "override", "bypass", "extract", "reveal", "system prompt",
 	"base prompt", "initial prompt", "ignore all", "forget all",
+	"prompt do sistema", "prompt do sistema", "desconsidere tudo",
+	"ignore tudo", "esqueça tudo", "instruções do sistema",
 }
 
 // Pre-compiled regex patterns for sanitization
@@ -57,6 +66,10 @@ var (
 		{regexp.MustCompile(`(?i)(new\s+instruction|new\s+prompt|new\s+directive|new\s+rule)`), ""},
 		{regexp.MustCompile(`(?i)(base64|hex|decode|encode).*?(instruction|prompt|system)`), ""},
 		{regexp.MustCompile(`(?i)jailbreak`), ""},
+		{regexp.MustCompile(`(?i)(desconsidere?|desobede[çc]a|ignore|esque[çc]a)\s+(tudo(\s+que)?\s+)?((dito\s+)?(antes|acima)\s+)?(as\s+)?(instru[çc][õo]es|instru[çc][ãõo]|diretrizes?|regras?)`), ""},
+		{regexp.MustCompile(`(?i)(revele|mostre|imprima|repita|diga|copie)\s+(seu\s+|o\s+|a\s+)?(prompt(\s+do\s+sistema)?|instru[çc][õo]es(\s+do\s+sistema)?|diretrizes?)`), ""},
+		{regexp.MustCompile(`(?i)(finja|aja)\s+que\s+.*?(desenvolvedor|admin|root|sistema|assistente|ia|gpt)`), ""},
+		{regexp.MustCompile(`(?i)(nova|novo)\s+(instru[çc][ãõo]|instru[çc][õo]es|prompt|diretriz|regra)`), ""},
 	}
 )
 
@@ -97,41 +110,41 @@ func SanitizeInput(input string) (sanitized string, detected bool) {
 	// 1. Escaping special characters that might be interpreted as instructions
 	// 2. Removing or neutralizing dangerous patterns
 	// 3. Preserving the core intent if possible
-	
+
 	if detected {
 		// Start with original input
 		sanitized = originalInput
-		
+
 		// Remove common injection markers
 		sanitized = reTag.ReplaceAllString(sanitized, "")
 		sanitized = reInst.ReplaceAllString(sanitized, "")
 		sanitized = reHeader.ReplaceAllString(sanitized, "")
-		
+
 		// Neutralize common injection phrases by removing or replacing them
 		for _, np := range neutralizePatternsList {
 			sanitized = np.pattern.ReplaceAllString(sanitized, np.replacement)
 		}
-		
+
 		// Escape potential instruction separators
 		sanitized = strings.ReplaceAll(sanitized, "\n\n---\n\n", "\n\n")
 		sanitized = strings.ReplaceAll(sanitized, "\n---\n", "\n")
-		
+
 		// Clean up extra whitespace
 		sanitized = reWhitespace.ReplaceAllString(sanitized, " ")
 		sanitized = strings.TrimSpace(sanitized)
-		
+
 		// If after sanitization the input is too short or empty, return a safe default
 		if len(sanitized) < 3 {
 			return "Desculpe, não entendi sua mensagem. Pode reformular?", true
 		}
-		
+
 		// Ensure sanitized differs from original (at minimum, trim should help)
 		// If somehow still identical, add a marker to indicate sanitization occurred
 		if sanitized == originalInput {
 			// This shouldn't happen, but if it does, we've at least logged it
 			// The system prompt will still protect against it
 		}
-		
+
 		return sanitized, true
 	}
 
@@ -156,7 +169,7 @@ func ValidateInput(input string) (string, error) {
 
 	// Sanitize for prompt injection
 	sanitized, detected := SanitizeInput(input)
-	
+
 	if detected {
 		// Log detection but still return sanitized input
 		// The system prompt will handle the rest
@@ -174,4 +187,3 @@ type ValidationError struct {
 func (e *ValidationError) Error() string {
 	return e.Message
 }
-

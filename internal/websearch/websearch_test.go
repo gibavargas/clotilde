@@ -53,3 +53,33 @@ func TestExtractJSONStrings(t *testing.T) {
 		t.Errorf("extractJSONStrings kept URL-only string: %q", got)
 	}
 }
+
+func TestIsInternalTarget(t *testing.T) {
+	internal := []string{
+		"http://localhost/x",
+		"http://127.0.0.1/x",
+		"http://10.0.0.1/x",
+		"http://192.168.1.1/x",
+		"http://172.16.0.1/x",
+		"http://169.254.169.254/metadata", // cloud metadata
+		"http://[::1]/x",
+		"http://service.internal/x",
+		"http://printer.local/x",
+		"not a url",
+	}
+	for _, u := range internal {
+		if !isInternalTarget(u) {
+			t.Errorf("internal target must be blocked: %s", u)
+		}
+	}
+	external := []string{
+		"https://www12.senado.leg.br/noticias",
+		"https://g1.globo.com/politica/",
+		"https://8.8.8.8/dns", // public IP is fine
+	}
+	for _, u := range external {
+		if isInternalTarget(u) {
+			t.Errorf("external target must be allowed: %s", u)
+		}
+	}
+}

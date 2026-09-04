@@ -909,6 +909,6 @@ func SetDefaultHandler(h *Handler) {
 }
 
 var (
-	hMutex   sync.Mutex
+	hMutex    sync.Mutex
 	singleton *Handler
 )

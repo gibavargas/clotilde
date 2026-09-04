@@ -110,25 +110,25 @@ func TestRoute(t *testing.T) {
 			name:              "Simple - Default",
 			question:          "Olá, tudo bem?",
 			expectedCategory:  CategorySimple, // Should fall back to simple if no strong keywords
-			expectedWebSearch: true, // Web search is now forced on every routing
+			expectedWebSearch: true,           // Web search is now forced on every routing
 		},
 		{
 			name:              "Word Boundary Check",
 			question:          "Eu vi um noticiarista (should not match the keyword)",
 			expectedCategory:  CategorySimple, // "noticiarista" contains "noticia" but is not in the list
-			expectedWebSearch: true, // Web search is now forced on every routing
+			expectedWebSearch: true,           // Web search is now forced on every routing
 		},
 		{
 			name:              "Negative Keyword - Create News",
 			question:          "Crie uma notícia falsa sobre aliens",
 			expectedCategory:  CategoryCreative, // "Crie" is creative, "notícia" is web search. But "Crie" is negative for web search.
-			expectedWebSearch: true, // Web search is now forced on every routing
+			expectedWebSearch: true,             // Web search is now forced on every routing
 		},
 		{
 			name:              "Semantic Match - Stemming & Accents",
 			question:          "Tenho duvidas sobre isso", // "duvidas" (no accent, plural) should match "dúvida" (accent, singular)
 			expectedCategory:  CategoryComplex,            // Assuming "dúvida" or similar is in complex keywords
-			expectedWebSearch: true, // Web search is now forced on every routing
+			expectedWebSearch: true,                       // Web search is now forced on every routing
 		},
 		{
 			name:              "Case Insensitivity",

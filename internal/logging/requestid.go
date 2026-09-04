@@ -81,4 +81,3 @@ func sanitizeRequestID(id string) string {
 	}
 	return id
 }
-

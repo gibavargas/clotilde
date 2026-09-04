@@ -43,14 +43,14 @@ var (
 	// domainHints expands a single spoken keyword into the phrasing a search
 	// engine actually rewards.
 	domainHints = map[string]string{
-		"senador":    "senado federal senador",
-		"dólar":      "cotação dólar",
-		"dolar":      "cotação dólar",
-		"placa":      "placa",
-		"presidente": "presidente",
-		"clima":      "clima tempo",
+		"senador":     "senado federal senador",
+		"dólar":       "cotação dólar",
+		"dolar":       "cotação dólar",
+		"placa":       "placa",
+		"presidente":  "presidente",
+		"clima":       "clima tempo",
 		"combustível": "preço combustível",
-		"pedágio":    "preço pedágio",
+		"pedágio":     "preço pedágio",
 	}
 
 	wordRe = regexp.MustCompile(`[\p{L}\p{N}]+`)

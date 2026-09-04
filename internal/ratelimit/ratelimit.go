@@ -149,7 +149,7 @@ func Middleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Skip rate limiting for health check and admin routes
-			if r.URL.Path == "/health" || strings.HasPrefix(r.URL.Path, "/admin") {
+			if r.URL.Path == "/health" || r.URL.Path == "/admin" || strings.HasPrefix(r.URL.Path, "/admin/") {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -190,7 +190,7 @@ func PreAuthMiddleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Skip pre-auth rate limiting for health check and admin routes
-			if r.URL.Path == "/health" || strings.HasPrefix(r.URL.Path, "/admin") {
+			if r.URL.Path == "/health" || r.URL.Path == "/admin" || strings.HasPrefix(r.URL.Path, "/admin/") {
 				next.ServeHTTP(w, r)
 				return
 			}

@@ -17,7 +17,7 @@ func TestNormalize(t *testing.T) {
 		{"Dúvidas", "duvida"},
 		{"dúvida", "duvida"},
 		{"QUAIS AS NOTÍCIAS?", "quai as noticia"}, // plural stem also drops -s on "quais"
-		{"correndo", "corre"},   // -ndo words get the gerund suffix stripped
+		{"correndo", "corre"},                     // -ndo words get the gerund suffix stripped
 		{"VamosCorrer", "vamoscorr"},
 		{"Números 1, 2 e 3!", "numero 1 2 e 3"}, // stopword "e" is not filtered by Normalize
 	}

@@ -1,3 +1,5 @@
+> **HISTORICAL DOCUMENT** — written before the 2026-09 hardening campaign. Defaults described here (models, logging, store behavior) may be outdated; the source of truth is `internal/admin/config.go`, `deploy.sh`, and `.env.example`.
+
 # Implementation Summary - Claude Haiku 4.5 Integration
 
 **Date**: December 23, 2025  

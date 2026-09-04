@@ -18,6 +18,7 @@ import (
 	"io"
 	"log"
 	"mime"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -332,9 +333,36 @@ func normalizeDDGURL(href string) string {
 	return ""
 }
 
+// isInternalTarget reports whether the URL points at loopback, private,
+// or link-local infrastructure. Search-result URLs are attacker-influenceable,
+// so the page fetcher must never probe internal endpoints.
+func isInternalTarget(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return true
+	}
+	host := u.Hostname()
+	if host == "localhost" || host == "" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified()
+	}
+	// Hostname endings that only resolve inside private networks.
+	for _, suffix := range []string{".local", ".internal", ".lan", ".home", ".corp"} {
+		if strings.HasSuffix(host, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
 // fetchPageText downloads a page (HTML with graceful JSON fallback) and
 // extracts readable text, best-effort under its own timeout.
 func fetchPageText(ctx context.Context, pageURL string) string {
+	if isInternalTarget(pageURL) {
+		return ""
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, pageURL, nil)
 	if err != nil {
 		return ""

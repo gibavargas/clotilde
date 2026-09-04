@@ -146,4 +146,3 @@ func TestMiddleware_ConstantTimeComparison(t *testing.T) {
 		})
 	}
 }
-
