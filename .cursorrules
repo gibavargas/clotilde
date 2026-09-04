@@ -112,17 +112,17 @@ docker push $IMAGE_NAME
 
 ## 🎯 KEY ARCHITECTURE DECISIONS
 
-### Claude Integration
-- Claude Haiku 4.5 is default model (fastest for CarPlay)
-- Claude MUST use Perplexity for web search queries (real-time data)
+### Provider & Search Integration
+- Default model: Cerebras `gemma-4-31b` (fastest, web-grounded via the Go search harness); Claude Haiku available as a configured provider
+- Web search: Go-native SERP harness (Bing first, DDG/Mojeek fallbacks) bounded by `webSearchBudget` (9s); no Perplexity integration exists
 - Never rely on training data for recent information
-- Web search: Perplexity (8s) + Claude (1-3s) = 9-11s total
+- Runtime config writes (`POST /api/config`) require ADMIN Basic credentials — the /chat API key is read-only for config
 
 ### Timeout Configuration
 - Apple Shortcuts: ~30s HTTP timeout
 - Request context: 25s (leaves 5s buffer)
 - OpenAI calls: 20s
-- Perplexity: 8s
+- Go search harness (webSearchBudget): 9s
 - Claude: 15s (typically 1-3s)
 - Cloud Run: 30s (matches client)
 
@@ -152,7 +152,7 @@ docker push $IMAGE_NAME
 3. **Committing secrets** - Always check git diff before committing
 4. **Skipping local tests** - Test locally to catch errors early
 5. **Forgetting to verify admin** - Always check admin returns 401 after deployment
-6. **Using training data for web search** - Always use Perplexity for real-time data
+6. **Using training data for web search** - Always ground real-time questions via the Go search harness
 
 ## 🔍 WHEN TO READ DOCUMENTATION
 
@@ -179,7 +179,7 @@ docker push $IMAGE_NAME
 ### User Experience
 - Admin dashboard enables runtime config (better UX)
 - Fast responses (Claude) improve CarPlay experience
-- Real-time data (Perplexity) for web search queries
+- Real-time data via the Go-native search harness (Bing/DDG)
 - Clear error messages help users troubleshoot
 
 ### Security

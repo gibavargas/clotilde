@@ -10,12 +10,11 @@ import (
 
 // RuntimeConfig holds runtime configuration that can be changed via admin UI
 type RuntimeConfig struct {
-	BaseSystemPrompt  string            `json:"base_system_prompt"` // Core principles (shared by all)
-	CategoryPrompts   map[string]string `json:"category_prompts"`   // category -> prompt override (optional)
-	StandardModel     string            `json:"standard_model"`     // Fast/cheap model (e.g., gpt-4.1-mini)
-	PremiumModel      string            `json:"premium_model"`      // Powerful model (default: gpt-4.1-mini, also supports gpt-4.1, o3)
-	CategoryModels    map[string]string `json:"category_models"`    // category -> model override (optional)
-	PerplexityEnabled bool              `json:"perplexity_enabled"` // Enable Perplexity Search API for web search (default: true)
+	BaseSystemPrompt string            `json:"base_system_prompt"` // Core principles (shared by all)
+	CategoryPrompts  map[string]string `json:"category_prompts"`   // category -> prompt override (optional)
+	StandardModel    string            `json:"standard_model"`     // Fast/cheap model (e.g., gpt-4.1-mini)
+	PremiumModel     string            `json:"premium_model"`      // Powerful model (default: gpt-4.1-mini, also supports gpt-4.1, o3)
+	CategoryModels   map[string]string `json:"category_models"`    // category -> model override (optional)
 
 	// Legacy field for backward compatibility
 	SystemPrompt string `json:"system_prompt,omitempty"`
@@ -24,12 +23,11 @@ type RuntimeConfig struct {
 var (
 	configMutex   sync.RWMutex
 	runtimeConfig = RuntimeConfig{
-		BaseSystemPrompt:  "", // Will be initialized with default from main.go
-		CategoryPrompts:   nil,
-		CategoryModels:    make(map[string]string),
-		StandardModel:     "claude-haiku-4-5-20251001", // Claude Haiku 4.5 - fastest, ideal for CarPlay
-		PremiumModel:      "claude-haiku-4-5-20251001", // Same fast model for all queries to avoid timeouts
-		PerplexityEnabled: true,                        // Default: enabled
+		BaseSystemPrompt: "", // Will be initialized with default from main.go
+		CategoryPrompts:  nil,
+		CategoryModels:   make(map[string]string),
+		StandardModel:    "gemma-4-31b", // Cerebras Gemma 4 31B - fastest (web-grounded via search harness)
+		PremiumModel:     "gemma-4-31b", // Same fast model for all queries to avoid timeouts
 	}
 	defaultCategoryPrompts = make(map[string]string) // Store default category prompts
 	initialized            = false
@@ -90,12 +88,11 @@ func GetConfig() RuntimeConfig {
 	}
 
 	return RuntimeConfig{
-		BaseSystemPrompt:  runtimeConfig.BaseSystemPrompt,
-		CategoryPrompts:   categoryPrompts,
-		CategoryModels:    categoryModels,
-		StandardModel:     runtimeConfig.StandardModel,
-		PremiumModel:      runtimeConfig.PremiumModel,
-		PerplexityEnabled: runtimeConfig.PerplexityEnabled,
+		BaseSystemPrompt: runtimeConfig.BaseSystemPrompt,
+		CategoryPrompts:  categoryPrompts,
+		CategoryModels:   categoryModels,
+		StandardModel:    runtimeConfig.StandardModel,
+		PremiumModel:     runtimeConfig.PremiumModel,
 		// Legacy support
 		SystemPrompt: runtimeConfig.BaseSystemPrompt,
 	}
@@ -220,18 +217,6 @@ func SetConfig(newConfig RuntimeConfig) error {
 
 	runtimeConfig.StandardModel = newConfig.StandardModel
 	runtimeConfig.PremiumModel = newConfig.PremiumModel
-
-	// Update PerplexityEnabled (always update if provided, default to true on first init)
-	if initialized {
-		runtimeConfig.PerplexityEnabled = newConfig.PerplexityEnabled
-	} else {
-		// On first initialization, use provided value or default to true
-		if newConfig.PerplexityEnabled {
-			runtimeConfig.PerplexityEnabled = true
-		} else {
-			runtimeConfig.PerplexityEnabled = false
-		}
-	}
 
 	return nil
 }

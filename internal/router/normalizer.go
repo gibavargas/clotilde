@@ -46,40 +46,65 @@ func isMn(r rune) bool {
 	return unicode.Is(unicode.Mn, r) // Mn: nonspacing marks
 }
 
-// stem applies simple Portuguese suffix removal rules
+// minStemLen is the shortest stem a suffix strip may produce. Stripping
+// below this (e.g. "vinho" -> "v") destroys matching power and invites
+// false positives on unrelated short tokens.
+const minStemLen = 3
+
+// stem applies simple Portuguese suffix removal rules (RSLP-lite). Every
+// strip is guarded so the remaining stem keeps at least minStemLen runes.
 func stem(word string) string {
 	// Ignore short words
 	if len(word) < 4 {
 		return word
 	}
 
+	stemOK := func(stemmed string) bool {
+		return len([]rune(stemmed)) >= minStemLen
+	}
+
 	// Plurals (s)
-	if strings.HasSuffix(word, "s") {
-		word = strings.TrimSuffix(word, "s")
+	if strings.HasSuffix(word, "s") && stemOK(word[:len(word)-1]) {
+		word = word[:len(word)-1]
 	}
 
 	// Adverbs (mente)
 	if strings.HasSuffix(word, "mente") {
-		return strings.TrimSuffix(word, "mente")
+		if s := word[:len(word)-len("mente")]; stemOK(s) {
+			return s
+		}
+		return word
 	}
 
 	// Gerund (ando, endo, indo)
 	if strings.HasSuffix(word, "ndo") {
-		word = strings.TrimSuffix(word, "ndo")
+		if s := word[:len(word)-3]; stemOK(s) {
+			return s
+		}
 		return word
 	}
 
 	// Verbs/Nouns (ar, er, ir, or)
-	if strings.HasSuffix(word, "ar") || strings.HasSuffix(word, "er") || strings.HasSuffix(word, "ir") || strings.HasSuffix(word, "or") {
-		return word[:len(word)-2]
+	if strings.HasSuffix(word, "ar") || strings.HasSuffix(word, "er") ||
+		strings.HasSuffix(word, "ir") || strings.HasSuffix(word, "or") {
+		if s := word[:len(word)-2]; stemOK(s) {
+			return s
+		}
+		return word
 	}
 
-	// Augmentative/Diminutive (inho, inha, ão, ões)
+	// Augmentative/Diminutive (inho, inha)
 	if strings.HasSuffix(word, "inho") || strings.HasSuffix(word, "inha") {
-		return word[:len(word)-4]
+		if s := word[:len(word)-4]; stemOK(s) {
+			return s
+		}
+		return word
 	}
 	if strings.HasSuffix(word, "oes") { // after accent removal: ões -> oes
-		return word[:len(word)-3] + "ao"
+		if s := word[:len(word)-3]; stemOK(s) {
+			return s + "ao"
+		}
+		return word
 	}
 
 	return word

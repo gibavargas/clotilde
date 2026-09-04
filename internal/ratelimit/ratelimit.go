@@ -111,7 +111,35 @@ func (rl *rateLimiter) isAllowedWithLimits(key string, perMinute, perHour int) b
 
 	// Add current request
 	rl.requests[key] = append(times, now)
+	if len(rl.requests) > maxTrackedKeys {
+		// Bound the key space: many distinct source IPs (or keys) must not
+		// grow the map without limit. Evict the least-recently-seen entry.
+		evictOldest(rl.requests, func(times []time.Time) time.Time {
+			return times[len(times)-1]
+		})
+	}
 	return true
+}
+
+// maxTrackedKeys bounds the number of distinct limiter keys (blunts a
+// memory-exhaustion attempt that rotates source IPs).
+const maxTrackedKeys = 10000
+
+// evictOldest deletes the entry with the oldest stamp, keeping the map at a
+// bounded size. O(n) per call, amortized negligible: it only runs on the
+// rare insert that crosses the bound.
+func evictOldest[K comparable, V any](m map[K]V, stamp func(V) time.Time) {
+	var oldestKey K
+	var oldest time.Time
+	for k, v := range m {
+		t := stamp(v)
+		if oldest.IsZero() || t.Before(oldest) {
+			oldestKey, oldest = k, t
+		}
+	}
+	if !oldest.IsZero() {
+		delete(m, oldestKey)
+	}
 }
 
 // Middleware implements rate limiting per validated API key or IP address

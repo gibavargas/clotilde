@@ -359,12 +359,6 @@ async function loadConfig() {
         if (config.premium_model) {
             document.getElementById('premiumModel').value = config.premium_model;
         }
-        if (config.perplexity_enabled !== undefined) {
-            document.getElementById('perplexityEnabled').checked = config.perplexity_enabled;
-        } else {
-            // Default to true if not set
-            document.getElementById('perplexityEnabled').checked = true;
-        }
     } catch (error) {
         console.error('Error loading config:', error);
         // Don't show error toast on load to avoid annoyance if backend isn't ready
@@ -405,7 +399,6 @@ async function saveConfig() {
         category_prompts: categoryPrompts,
         standard_model: document.getElementById('standardModel').value,
         premium_model: document.getElementById('premiumModel').value,
-        perplexity_enabled: document.getElementById('perplexityEnabled').checked,
         // Legacy support
         system_prompt: basePrompt
     };

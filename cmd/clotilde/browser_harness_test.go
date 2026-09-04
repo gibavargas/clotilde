@@ -1,42 +1,26 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/clotilde/carplay-assistant/internal/admin"
 	"github.com/clotilde/carplay-assistant/internal/logging"
 )
 
-func TestPerformSearchWithBrowserHarness_OnBlockedResult(t *testing.T) {
+func TestPerformSearchWithBrowserHarness_UsesHarnessDirectly(t *testing.T) {
 	t.Setenv("CLOTILDE_BROWSER_HARNESS_HELPER", "1")
 
-	perplexityServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(PerplexitySearchResponse{
-			Results: []PerplexitySearchResult{
-				{
-					Title:   "Just a moment",
-					URL:     "https://example.com/blocked",
-					Snippet: "Please verify you are not a robot before continuing.",
-				},
-			},
-		})
-	}))
-	defer perplexityServer.Close()
-
 	server := &Server{
-		perplexityAPIKey:    "test-perplexity",
-		perplexitySearchURL: perplexityServer.URL,
 		browserHarness: BrowserHarnessConfig{
 			Enabled:  true,
 			Command:  os.Args[0],
 			Args:     []string{"-test.run=TestBrowserHarnessHelper"},
-			Mode:     browserHarnessModeBlocked,
+			Mode:     browserHarnessModeAlways,
 			MaxPages: 1,
 		},
 	}
@@ -45,47 +29,20 @@ func TestPerformSearchWithBrowserHarness_OnBlockedResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("performSearchWithBrowserHarness failed: %v", err)
 	}
-	if len(results) != 2 {
-		t.Fatalf("expected original and rendered result, got %+v", results)
+	if len(results) != 1 {
+		t.Fatalf("expected one rendered result, got %+v", results)
 	}
-	if results[1].Title != "Rendered page" || results[1].Snippet != "Rendered page text" {
-		t.Fatalf("expected rendered browser harness result, got %+v", results[1])
+	if results[0].Title != "Rendered page" || results[0].Snippet != "Rendered page text" {
+		t.Fatalf("expected rendered browser harness result, got %+v", results[0])
 	}
 }
 
-func TestPerformSearchWithBrowserHarness_SkipsUnblockedResultInBlockedMode(t *testing.T) {
-	perplexityServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(PerplexitySearchResponse{
-			Results: []PerplexitySearchResult{
-				{
-					Title:   "Public page",
-					URL:     "https://example.com/public",
-					Snippet: "Normal public snippet.",
-				},
-			},
-		})
-	}))
-	defer perplexityServer.Close()
-
-	server := &Server{
-		perplexityAPIKey:    "test-perplexity",
-		perplexitySearchURL: perplexityServer.URL,
-		browserHarness: BrowserHarnessConfig{
-			Enabled:  true,
-			Command:  os.Args[0],
-			Args:     []string{"-test.run=TestBrowserHarnessHelper"},
-			Mode:     browserHarnessModeBlocked,
-			MaxPages: 1,
-		},
+func TestSearchResultsLookBlocked(t *testing.T) {
+	if !searchResultsLookBlocked([]SearchResult{{Title: "Just a moment", Snippet: "Please verify you are not a robot"}}) {
+		t.Fatalf("expected blocked search result to be detected")
 	}
-
-	results, err := server.performSearchWithBrowserHarness(t.Context(), "normal query")
-	if err != nil {
-		t.Fatalf("performSearchWithBrowserHarness failed: %v", err)
-	}
-	if len(results) != 1 {
-		t.Fatalf("expected only Perplexity result, got %+v", results)
+	if searchResultsLookBlocked([]SearchResult{{Title: "Public page", Snippet: "Normal public snippet."}}) {
+		t.Fatalf("expected public search result to stay unblocked")
 	}
 }
 
@@ -109,6 +66,41 @@ func TestBrowserHarnessConfigFromEnv(t *testing.T) {
 	}
 }
 
+func TestBrowserHarnessConfigFromEnv_DefaultsForCarPlayBudget(t *testing.T) {
+	t.Setenv("CAMOUFOX_HARNESS_ENABLED", "true")
+	t.Setenv("CAMOUFOX_HARNESS_CMD", "python3")
+
+	cfg := browserHarnessConfigFromEnv()
+	if cfg.MaxPages != defaultBrowserHarnessMaxPages {
+		t.Fatalf("expected default max pages %d, got %d", defaultBrowserHarnessMaxPages, cfg.MaxPages)
+	}
+	if cfg.Timeout != defaultBrowserHarnessTimeout {
+		t.Fatalf("expected default timeout %s, got %s", defaultBrowserHarnessTimeout, cfg.Timeout)
+	}
+}
+
+func TestBrowserHarnessTimeoutWithinBudget_CapsConfiguredTimeout(t *testing.T) {
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(14*time.Second))
+	defer cancel()
+
+	got, err := browserHarnessTimeoutWithinBudget(ctx, 12*time.Second)
+	if err != nil {
+		t.Fatalf("expected timeout to be capped, got error: %v", err)
+	}
+	if got < 5*time.Second || got > 7*time.Second {
+		t.Fatalf("expected capped timeout around 6s, got %s", got)
+	}
+}
+
+func TestBrowserHarnessTimeoutWithinBudget_RequiresProviderReserve(t *testing.T) {
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(9*time.Second))
+	defer cancel()
+
+	if _, err := browserHarnessTimeoutWithinBudget(ctx, 8*time.Second); err == nil {
+		t.Fatalf("expected error when provider generation reserve would be exhausted")
+	}
+}
+
 func TestLiveClaudeUsesBrowserHarnessEvidence(t *testing.T) {
 	if os.Getenv("RUN_LIVE_PROVIDER_TESTS") != "1" {
 		t.Skip("set RUN_LIVE_PROVIDER_TESTS=1 to call the external provider")
@@ -124,38 +116,21 @@ func TestLiveClaudeUsesBrowserHarnessEvidence(t *testing.T) {
 	config := admin.GetConfig()
 	defer admin.SetConfig(config)
 	if err := admin.SetConfig(admin.RuntimeConfig{
-		BaseSystemPrompt:  clotildeBaseSystemPromptTemplate,
-		StandardModel:     defaultClaudeHaikuModel,
-		PremiumModel:      defaultClaudeHaikuModel,
-		PerplexityEnabled: true,
+		BaseSystemPrompt: clotildeBaseSystemPromptTemplate,
+		StandardModel:    defaultClaudeHaikuModel,
+		PremiumModel:     defaultClaudeHaikuModel,
 	}); err != nil {
 		t.Fatalf("failed to configure live Claude browser harness test: %v", err)
 	}
 
-	perplexityServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(PerplexitySearchResponse{
-			Results: []PerplexitySearchResult{
-				{
-					Title:   "Just a moment",
-					URL:     "https://example.com/blocked-live",
-					Snippet: "Please verify you are not a robot before continuing.",
-				},
-			},
-		})
-	}))
-	defer perplexityServer.Close()
-
 	server := &Server{
-		claudeAPIKey:        claudeKey,
-		perplexityAPIKey:    "test-perplexity",
-		perplexitySearchURL: perplexityServer.URL,
-		logger:              logging.NewLogger(4),
+		claudeAPIKey: claudeKey,
+		logger:       logging.NewLogger(4),
 		browserHarness: BrowserHarnessConfig{
 			Enabled:  true,
 			Command:  os.Args[0],
 			Args:     []string{"-test.run=TestBrowserHarnessHelper"},
-			Mode:     browserHarnessModeBlocked,
+			Mode:     browserHarnessModeAlways,
 			MaxPages: 1,
 		},
 	}
@@ -183,7 +158,7 @@ func TestBrowserHarnessHelper(t *testing.T) {
 	if err := json.NewDecoder(os.Stdin).Decode(&req); err != nil {
 		t.Fatalf("failed to decode harness request: %v", err)
 	}
-	if req.Query == "" || len(req.Results) != 1 || req.MaxPages != 1 {
+	if req.Query == "" || req.MaxPages != 1 {
 		t.Fatalf("unexpected harness request: %+v", req)
 	}
 
@@ -197,7 +172,7 @@ func TestBrowserHarnessHelper(t *testing.T) {
 	}
 
 	json.NewEncoder(os.Stdout).Encode(BrowserHarnessResponse{
-		Results: []PerplexitySearchResult{
+		Results: []SearchResult{
 			{
 				Title:   title,
 				URL:     "https://example.com/rendered",

@@ -118,8 +118,8 @@ func provision(ctx context.Context, cfg SetupConfig, runner CommandRunner, stdou
 			return err
 		}
 	}
-	if cfg.Perplexity.Enabled {
-		if err := createOrUpdateSecret(ctx, runner, cfg.Perplexity.Secret); err != nil {
+	if cfg.ZAI.Enabled {
+		if err := createOrUpdateSecret(ctx, runner, cfg.ZAI.Secret); err != nil {
 			return err
 		}
 	}
@@ -234,7 +234,8 @@ func deploy(ctx context.Context, cfg SetupConfig, opts Options, runner CommandRu
 		"--allow-unauthenticated",
 		"--memory", "256Mi",
 		"--cpu", "1",
-		"--min-instances", "0",
+		"--cpu-boost",
+		"--min-instances", fmt.Sprintf("%d", cfg.MinInstances),
 		"--max-instances", "10",
 		"--timeout", "60",
 		"--set-env-vars", buildEnvVars(cfg, opts.DryRun),
@@ -279,14 +280,14 @@ func buildSecretVars(cfg SetupConfig) string {
 	if cfg.ConfigAPI.Enabled {
 		secrets = append(secrets, "CONFIG_API_KEY="+cfg.ConfigAPI.Secret.SecretName+":latest")
 	}
-	if cfg.Perplexity.Enabled {
-		secrets = append(secrets, "PERPLEXITY_KEY_SECRET_NAME="+cfg.Perplexity.Secret.SecretName+":latest")
-	}
 	if cfg.Claude.Enabled {
 		secrets = append(secrets, "CLAUDE_KEY_SECRET_NAME="+cfg.Claude.Secret.SecretName+":latest")
 	}
 	if cfg.OpenRouter.Enabled {
 		secrets = append(secrets, "OPENROUTER_KEY_SECRET_NAME="+cfg.OpenRouter.Secret.SecretName+":latest")
+	}
+	if cfg.ZAI.Enabled {
+		secrets = append(secrets, "ZAI_KEY_SECRET_NAME="+cfg.ZAI.Secret.SecretName+":latest")
 	}
 	return strings.Join(secrets, ",")
 }

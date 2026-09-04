@@ -40,7 +40,7 @@ Changes:
 - Optimized request timeouts
   - Request context: 60s → 25s
   - OpenAI calls: 60s → 20s
-  - Perplexity search: 30s → 8s
+  - Browser search harness: 30s → 8s
   - Cloud Run: 60s → 30s
   - HTTP server: Added read/write/idle timeouts
   
@@ -95,7 +95,7 @@ Changes:
 ```go
 // Request context: 25s (Apple Shortcuts: ~30s)
 // OpenAI calls: 20s (within 25s budget)
-// Perplexity: 8s (allows OpenAI time)
+// Browser search harness: 8s (allows provider-native search time)
 // Claude: 15s (typically 1-3s)
 // Cloud Run: 30s (matches client)
 // HTTP server: Read 10s, Write 30s, Idle 60s
@@ -204,7 +204,7 @@ $ gcloud run services logs read clotilde --region=us-central1 --limit=5
 ## Backward Compatibility
 
 - ✅ Falls back to OpenAI if Claude not configured
-- ✅ Web search still functional (Perplexity or OpenAI)
+- ✅ Web search still functional through provider-native search
 - ✅ Admin dashboard unchanged
 - ✅ All existing API clients still work
 - ✅ Rate limiting preserved
@@ -236,7 +236,7 @@ $ gcloud run services logs read clotilde --region=us-central1 --limit=5
 
 2. **Model Limitations**
    - Max 500 tokens per request (intentional for CarPlay)
-   - No web search from Claude (uses Perplexity instead)
+   - Web search depends on the configured provider's native tool
    - May refuse some requests per Anthropic policies
 
 3. **Regional Availability**
@@ -303,4 +303,3 @@ Documentation            : Complete
 **Status**: ✅ Ready for production use  
 **Repository**: https://github.com/gibavargas/clotilde  
 **Main Commits**: 456cd09, 4b272e1
-

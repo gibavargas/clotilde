@@ -92,6 +92,7 @@ Set at least one direct model provider key:
 | `CLAUDE_KEY_SECRET_NAME` | Direct Anthropic API key value (recommended) | `sk-ant-...` |
 | `OPENROUTER_KEY_SECRET_NAME` | Direct OpenRouter API key value | `sk-or-v1-...` |
 | `OPENAI_KEY_SECRET_NAME` | Direct OpenAI API key value | `sk-...` |
+| `ZAI_KEY_SECRET_NAME` | Direct Z.AI API key value | `zai-...` |
 
 ### Alternative (Secret Manager Lookup)
 
@@ -103,16 +104,10 @@ If direct key values are not set, the app will try Secret Manager:
 | `CLAUDE_SECRET_NAME` | Name of Claude secret in Secret Manager | `clotilde-claude-abc123` |
 | `OPENROUTER_SECRET_NAME` | Name of OpenRouter secret in Secret Manager | `clotilde-openrouter-abc123` |
 | `OPENAI_SECRET_NAME` | Name of OpenAI secret in Secret Manager | `clotilde-oai-abc123` |
+| `ZAI_SECRET_NAME` | Name of Z.AI secret in Secret Manager | `clotilde-zai-abc123` |
 | `GOOGLE_CLOUD_PROJECT` | GCP project ID | `my-project-id` |
 
-**Priority**: Direct values such as `CLAUDE_KEY_SECRET_NAME` take precedence over Secret Manager lookup. Configure at least one model provider: Claude, OpenRouter, or OpenAI.
-
-Optional search provider variables follow the same pattern:
-
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `PERPLEXITY_KEY_SECRET_NAME` | Direct Perplexity API key value in local mode | `pplx-...` |
-| `PERPLEXITY_SECRET_NAME` | Perplexity secret name in Secret Manager | `clotilde-perplexity-xyz789` |
+**Priority**: Direct values such as `CLAUDE_KEY_SECRET_NAME` take precedence over Secret Manager lookup. Configure at least one model provider: Claude, OpenRouter, OpenAI, or Z.AI.
 
 ## Docker Compose (Optional)
 

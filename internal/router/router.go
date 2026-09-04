@@ -2,6 +2,7 @@ package router
 
 import (
 	"log"
+	"os"
 	"regexp"
 	"strings"
 
@@ -181,6 +182,12 @@ func Route(question string) RouteDecision {
 		CategoryMathematical: matchCategory(questionNormalized, CategoryMathematical) * categoryWeights[CategoryMathematical],
 		CategoryCreative:     matchCategory(questionNormalized, CategoryCreative) * categoryWeights[CategoryCreative],
 	}
+	if shouldTreatAsFactualLookup(question, questionNormalized) && scores[CategoryFactual] < minCategoryScore {
+		scores[CategoryFactual] = minCategoryScore
+		if scores[CategoryFactual] <= scores[CategoryComplex] {
+			scores[CategoryFactual] = scores[CategoryComplex] + 0.1
+		}
+	}
 
 	// Find highest scoring category with deterministic tie-breaking
 	var bestCategory Category = CategorySimple
@@ -243,7 +250,17 @@ func Route(question string) RouteDecision {
 		}
 	}
 
-	webSearch = categoryUsesWebSearch(bestCategory)
+	// Web search policy:
+	//   - Default (SEARCH_ONLY_CATEGORIES unset): today's deployable behavior —
+	//     search on every routing, so even deterministic categories stay
+	//     grounded and Cerebras models (no server-side tool) get the Go
+	//     search harness in main.go.
+	//   - Opt-in budget saver (SEARCH_ONLY_CATEGORIES=true): search only for
+	//     categories whose answers actually rot (news/factual lookups);
+	//     simple/creative/complex answer from the model within seconds.
+	if AlwaysSearchAllCategories() || categoryUsesWebSearch(bestCategory) {
+		webSearch = true
+	}
 
 	// If web search is needed, ensure the model supports it
 	if webSearch {
@@ -251,11 +268,16 @@ func Route(question string) RouteDecision {
 		isOpenRouter := strings.HasPrefix(model, "openrouter/")
 		supportsWebSearch := modelsWithWebSearch[model]
 		isGPT5 := strings.HasPrefix(model, "gpt-5")
+		isCerebras := model == "gemma-4-31b" || model == "gpt-oss-120b"
 
 		if isOpenRouter {
 			// OpenRouter models use OpenRouter's server-side web search tool in main.go.
 		} else if isClaude {
-			// Claude uses native web_search in main.go, with Perplexity/OpenAI fallbacks there if needed.
+			// Claude uses native web_search in main.go, with search-harness fallback there if needed.
+		} else if strings.HasPrefix(model, "zai/") {
+			// Z.AI models use native web_search in main.go, with search-harness fallback there if needed.
+		} else if isCerebras {
+			// Cerebras models are grounded via the Go-native search harness in main.go.
 		} else if !supportsWebSearch {
 			log.Printf("Model %s does not support web search, using fallback: %s", model, webSearchFallbackModel)
 			model = webSearchFallbackModel
@@ -276,4 +298,82 @@ func Route(question string) RouteDecision {
 
 func categoryUsesWebSearch(category Category) bool {
 	return category == CategoryWebSearch || category == CategoryFactual
+}
+
+// AlwaysSearchAllCategories reports the web-search policy: by default every
+// category is grounded (the deployed behavior). Setting
+// SEARCH_ONLY_CATEGORIES=true restricts search to web-search/factual
+// categories, cutting up to 9s of SERP scraping from trivial questions.
+func AlwaysSearchAllCategories() bool {
+	env := os.Getenv("SEARCH_ONLY_CATEGORIES")
+	return !(strings.EqualFold(env, "true") || strings.EqualFold(env, "1"))
+}
+
+func shouldTreatAsFactualLookup(question, questionNormalized string) bool {
+	prefixes := []string{
+		"o que e ",
+		"o que sao ",
+		"quem e ",
+		"quem sao ",
+	}
+
+	topic := ""
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(questionNormalized, prefix) {
+			topic = strings.TrimSpace(strings.TrimPrefix(questionNormalized, prefix))
+			break
+		}
+	}
+	if topic == "" {
+		return false
+	}
+
+	topic = strings.TrimSpace(strings.TrimPrefix(topic, "um "))
+	topic = strings.TrimSpace(strings.TrimPrefix(topic, "uma "))
+	topic = strings.TrimSpace(strings.TrimPrefix(topic, "o "))
+	topic = strings.TrimSpace(strings.TrimPrefix(topic, "a "))
+	if topic == "" {
+		return false
+	}
+
+	if hasAcronym(question) {
+		return true
+	}
+
+	return hasRealWorldProductSignal(topic)
+}
+
+func hasAcronym(question string) bool {
+	for _, field := range strings.Fields(question) {
+		trimmed := strings.Trim(field, " \t\n\r?!.,:;()[]{}\"'")
+		if len(trimmed) < 2 {
+			continue
+		}
+		if strings.ToUpper(trimmed) == trimmed && strings.ToLower(trimmed) != trimmed {
+			return true
+		}
+	}
+	return false
+}
+
+func hasRealWorldProductSignal(topic string) bool {
+	signals := []string{
+		"aws",
+		"azure",
+		"gcp",
+		"google cloud",
+		"cloudflare",
+		"openai",
+		"anthropic",
+		"kubernetes",
+		"docker",
+		"cloud run",
+		"global accelerator",
+	}
+	for _, signal := range signals {
+		if strings.Contains(topic, signal) {
+			return true
+		}
+	}
+	return false
 }

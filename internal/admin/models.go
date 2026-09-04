@@ -36,6 +36,10 @@ var validModels = map[string]bool{
 	"o3-mini": true,
 	"o4-mini": true,
 
+	// Cerebras models (OpenAI-compatible, grounded via the Go search harness)
+	"gemma-4-31b": true,
+	"gpt-oss-120b": true,
+
 	// Claude models
 	"claude-haiku-4-5-20251001":  true,
 	"claude-3-5-haiku-20241022":  true,
@@ -48,13 +52,19 @@ var validModels = map[string]bool{
 	// OpenRouter curated shortcuts. Additional OpenRouter slugs are accepted
 	// when prefixed with openrouter/ and shaped as provider/model.
 	"openrouter/anthropic/claude-haiku-4.5": true,
+
+	// Z.AI GLM shortcuts. Additional Z.AI model IDs are accepted when prefixed
+	// with zai/ and shaped as a single model slug.
+	"zai/glm-4.7-flash": true,
+	"zai/glm-4.7":       true,
+	"zai/glm-5.1":       true,
 }
 
 func IsValidModel(model string) bool {
 	if validModels[model] {
 		return true
 	}
-	return isValidOpenRouterModel(model)
+	return isValidOpenRouterModel(model) || isValidZAIModel(model)
 }
 
 func isValidOpenRouterModel(model string) bool {
@@ -67,4 +77,15 @@ func isValidOpenRouterModel(model string) bool {
 	}
 	provider, name, ok := strings.Cut(slug, "/")
 	return ok && provider != "" && name != ""
+}
+
+func isValidZAIModel(model string) bool {
+	slug, ok := strings.CutPrefix(model, "zai/")
+	if !ok {
+		return false
+	}
+	if strings.TrimSpace(slug) != slug || strings.ContainsAny(slug, "\x00\r\n\t /") {
+		return false
+	}
+	return slug != ""
 }

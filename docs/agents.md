@@ -1101,8 +1101,8 @@ ok      github.com/clotilde/carplay-assistant/cmd/clotilde        0.112s
 
 **Last Updated**: 2025-01-XX  
 **Status**: Implemented ✅  
-**Test Count**: 52 tests  
-**Coverage**: Security-critical paths 100%
+**Test Count**: run `go test ./... -v` for the live count (this doc previously claimed 52; the suite has grown)  
+**Coverage**: run `go test ./... -cover` for live numbers
 
 ---
 
@@ -1157,14 +1157,14 @@ A comprehensive test suite was created to verify:
 | `TestScoringAccuracy` | 4 | ✅ PASS | Scoring system accurate |
 | `TestModelSelection` | 5 | ✅ PASS | Correct model per category |
 | `TestWebSearchFallback` | 1 | ✅ PASS | Fallback works when model doesn't support web search |
-| `TestGPT5ReasoningEffort` | 1 | ✅ PASS | GPT-5 correctly sets reasoning="low" |
+| `TestGPT5ReasoningEffort` | 1 | ✅ PASS | GPT-5 correctly sets reasoning="medium" |
 | `TestNegativeKeywords` | 3 | ✅ PASS | Prevents false positives effectively |
 | `TestEdgeCases` | 6 | ✅ PASS | Handles empty strings, long inputs, special chars |
 | `TestTieBreaking` | 2 | ✅ PASS | Priority order works correctly |
 | `TestNormalizationEdgeCases` | 13 | ✅ PASS | Accent removal, stemming, case handling |
 | `TestCategoryModelsOverride` | 1 | ✅ PASS | Runtime model overrides work |
 
-**Total**: 48 functional test cases, all passing
+**Total**: run `go test ./... -v` for the live count (this doc previously claimed 48; the suite has grown)
 
 ---
 
@@ -1213,7 +1213,7 @@ BenchmarkMatchCategory:    ~53,347 ns/op   (~0.05ms per category match)
    - Web search flag set correctly
 
 4. **GPT-5 Reasoning Effort**
-   - GPT-5 with web search → `reasoningEffort="low"` (required)
+   - GPT-5 with web search → `reasoningEffort="medium"` (minimum required)
    - Correctly detected GPT-5 series
    - Reasoning effort only set when needed
 
@@ -1309,7 +1309,7 @@ BenchmarkMatchCategory:    ~53,347 ns/op   (~0.05ms per category match)
 
 **Fallback Logic**:
 - Model doesn't support web search → fallback to `gpt-4o-mini` ✅
-- GPT-5 with web search → `reasoningEffort="low"` ✅
+- GPT-5 with web search → `reasoningEffort="medium"` ✅
 
 #### Negative Keywords
 
@@ -1453,7 +1453,7 @@ func Route(question string) RouteDecision {
 **CRITICAL**:
 - Category model overrides checked first
 - Web search fallback applied if model doesn't support it
-- GPT-5 requires `reasoningEffort="low"` for web search
+- GPT-5 requires `reasoningEffort="medium"` (minimum) for web search
 
 #### 3. Normalization (`normalizer.go`)
 
@@ -1901,7 +1901,7 @@ After deploying, verify:
 
 **Last Updated**: 2025-11-25  
 **Status**: Testing Complete ✅  
-**Test Count**: 48 functional tests + 3 benchmarks  
+**Test Count**: see `go test ./... -v`; includes unit + integration + benchmarks  
 **Pass Rate**: 100%  
 **Rating**: 8.5/10 (Production-ready)
 

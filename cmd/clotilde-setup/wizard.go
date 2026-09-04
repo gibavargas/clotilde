@@ -141,12 +141,13 @@ func collectInteractiveConfig(ctx context.Context, cfg SetupConfig, runner Comma
 	}
 	cfg.Region = prompt(reader, stdout, "Region", valueOrDefault(cfg.Region, "us-central1"))
 	if quick {
-		fmt.Fprintf(stdout, "Using service %q, repo %q, image tag %q, and log buffer %d.\n", cfg.ServiceName, cfg.RepoName, cfg.ImageTag, cfg.LogBufferSize)
+		fmt.Fprintf(stdout, "Using service %q, repo %q, image tag %q, log buffer %d, and min instances %d.\n", cfg.ServiceName, cfg.RepoName, cfg.ImageTag, cfg.LogBufferSize, cfg.MinInstances)
 	} else {
 		cfg.ServiceName = prompt(reader, stdout, "Cloud Run service name", valueOrDefault(cfg.ServiceName, "clotilde"))
 		cfg.RepoName = prompt(reader, stdout, "Artifact Registry repo name", valueOrDefault(cfg.RepoName, "clotilde-repo"))
 		cfg.ImageTag = prompt(reader, stdout, "Image tag", valueOrDefault(cfg.ImageTag, defaultImageTag))
 		cfg.LogBufferSize = promptInt(reader, stdout, "Log buffer size", valueOrDefault(strconv.Itoa(cfg.LogBufferSize), "1000"))
+		cfg.MinInstances = promptInt(reader, stdout, "Minimum warm Cloud Run instances", valueOrDefault(strconv.Itoa(cfg.MinInstances), "0"))
 	}
 
 	cfg.API = collectSecretSource(reader, stdinFile, stdout, cfg.API, "Service API key", defaultSecretName("clotilde-auth"), []string{"CLOTILDE_API_KEY", "API_KEY_SECRET_NAME"}, true, true)
@@ -167,13 +168,13 @@ func collectInteractiveConfig(ctx context.Context, cfg SetupConfig, runner Comma
 		cfg.OpenRouter.Secret = collectSecretSource(reader, stdinFile, stdout, cfg.OpenRouter.Secret, "OpenRouter API key", defaultSecretName("clotilde-openrouter"), []string{"OPENROUTER_API_KEY", "OPENROUTER_KEY_SECRET_NAME"}, false, false)
 	}
 
-	if isSecretConfigured(cfg.OpenAI) || confirm(reader, stdout, "Enable OpenAI Responses fallback?", cfg.OpenAI.SecretName != "" || cfg.Implementation == implementationOpenClaw) {
-		cfg.OpenAI = collectSecretSource(reader, stdinFile, stdout, cfg.OpenAI, "OpenAI API key", defaultSecretName("clotilde-oai"), []string{"OPENAI_API_KEY", "OPENAI_KEY_SECRET_NAME"}, false, false)
+	cfg.ZAI.Enabled = confirm(reader, stdout, "Enable Z.AI GLM fallback?", cfg.ZAI.Enabled)
+	if cfg.ZAI.Enabled {
+		cfg.ZAI.Secret = collectSecretSource(reader, stdinFile, stdout, cfg.ZAI.Secret, "Z.AI API key", defaultSecretName("clotilde-zai"), []string{"ZAI_API_KEY", "Z_AI_API_KEY", "ZAI_KEY_SECRET_NAME"}, false, false)
 	}
 
-	cfg.Perplexity.Enabled = confirm(reader, stdout, "Enable Perplexity search?", cfg.Perplexity.Enabled)
-	if cfg.Perplexity.Enabled {
-		cfg.Perplexity.Secret = collectSecretSource(reader, stdinFile, stdout, cfg.Perplexity.Secret, "Perplexity API key", defaultSecretName("clotilde-perplexity"), []string{"PERPLEXITY_API_KEY", "PERPLEXITY_KEY_SECRET_NAME"}, false, false)
+	if isSecretConfigured(cfg.OpenAI) || confirm(reader, stdout, "Enable OpenAI Responses fallback?", cfg.OpenAI.SecretName != "" || cfg.Implementation == implementationOpenClaw) {
+		cfg.OpenAI = collectSecretSource(reader, stdinFile, stdout, cfg.OpenAI, "OpenAI API key", defaultSecretName("clotilde-oai"), []string{"OPENAI_API_KEY", "OPENAI_KEY_SECRET_NAME"}, false, false)
 	}
 
 	cfg.ConfigAPI.Enabled = confirm(reader, stdout, "Enable dedicated config API key?", cfg.ConfigAPI.Enabled || cfg.Implementation == implementationOpenClaw || cfg.Implementation == implementationHermes)

@@ -9,7 +9,7 @@ Clotilde CarPlay Assistant implements multiple layers of security to protect use
 ### Assets to Protect
 
 1. **User Prompts**: Voice input from CarPlay users
-2. **API Keys**: upstream provider keys (Claude, OpenRouter, OpenAI, Perplexity) and service authentication key
+2. **API Keys**: upstream provider keys (Claude, OpenRouter, OpenAI, Z.AI) and service authentication key
 3. **Service Availability**: Protection against DDoS and abuse
 4. **User Privacy**: Full prompts and responses are logged for admin/audit visibility, so access control and retention policy matter
 
@@ -161,7 +161,7 @@ All category-specific prompts include a "SEGURANÇA E COMPORTAMENTO" section tha
   - Anthropic Claude API key secret (recommended primary provider)
   - OpenRouter API key secret (optional provider/fallback)
   - OpenAI API key secret (optional Responses fallback)
-  - Perplexity API key secret (optional search provider)
+  - Z.AI API key secret (optional GLM fallback)
   - Service authentication key secret (configurable name)
 - **Security**: Use unique, unpredictable secret names to prevent enumeration attacks
 - **Access**: Cloud Run service account with least privilege
@@ -273,7 +273,7 @@ If full content logging is enabled, any Personal Identifiable Information (PII),
   - Logs are encrypted at rest in Google Cloud Logging
   - Logs are encrypted in transit (HTTPS)
   - Access is restricted via IAM and Basic Auth
-  - IP addresses are hashed using SHA-256 with salt (not stored in plain text)
+  - Request-log IP addresses are hashed using SHA-256 with salt. Note: admin audit lines (`[ADMIN_AUDIT]`) log the client IP in plain text — an accepted trade-off for lockout debugging.
 - **Data Subject Rights (GDPR/CCPA/LGPD)**: 
   - Users may request log deletion (requires manual deletion from Cloud Logging)
   - Consider implementing log export/deletion capabilities for compliance
@@ -314,7 +314,7 @@ If full content logging is enabled, any Personal Identifiable Information (PII),
 **Data Flow**:
 1. User speaks → Apple Shortcut
 2. Shortcut → HTTPS POST to Cloud Run
-3. Cloud Run → configured provider API (Anthropic, OpenRouter, OpenAI, and/or Perplexity) over HTTPS
+3. Cloud Run → configured provider API (Anthropic, OpenRouter, OpenAI, and/or Z.AI) over HTTPS
 4. Response → User via Shortcut
 5. Request/response metadata logged to in-memory buffer and Cloud Logging
 6. Logs accessible via admin dashboard (authenticated) or Cloud Logging (IAM-protected)
@@ -328,7 +328,7 @@ If full content logging is enabled, any Personal Identifiable Information (PII),
 4. **Auto-scaling**: Cloud Run scales to handle traffic
 
 **Configuration**:
-- Min instances: 0 (cost optimization)
+- Min instances: 0 by default so the service can scale to zero when idle; keep startup CPU boost on and optionally pre-wake with `GET /health` from a trusted phone/car shortcut before `POST /chat`
 - Max instances: 10 (prevent runaway costs)
 - Timeout: 30 seconds
 

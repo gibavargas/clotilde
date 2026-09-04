@@ -59,7 +59,7 @@ func TestScoringAccuracy(t *testing.T) {
 			score := matchCategory(Normalize(tt.question), tt.expectedCat) * categoryWeights[tt.expectedCat]
 
 			if score < tt.expectedMin || score > tt.expectedMax {
-				t.Logf("Score %.2f for category %s (expected %.2f-%.2f)", score, tt.expectedCat, tt.expectedMin, tt.expectedMax)
+				t.Errorf("Score %.2f for category %s outside expected %.2f-%.2f", score, tt.expectedCat, tt.expectedMin, tt.expectedMax)
 			}
 
 			if decision.Category != tt.expectedCat {
@@ -99,7 +99,7 @@ func TestModelSelection(t *testing.T) {
 			name:          "Complex uses premium model",
 			question:      "Explique a teoria da relatividade",
 			expectedCat:   CategoryComplex,
-			webSearch:     false,
+			webSearch:     true, // Web search is now forced on every routing
 			standardModel: "gpt-4o-mini",
 			premiumModel:  "gpt-4.1",
 			expectedModel: "gpt-4.1", // Premium model
@@ -108,7 +108,7 @@ func TestModelSelection(t *testing.T) {
 			name:          "Creative uses premium model",
 			question:      "Sugira nomes para um gato",
 			expectedCat:   CategoryCreative,
-			webSearch:     false,
+			webSearch:     true, // Web search is now forced on every routing
 			standardModel: "gpt-4o-mini",
 			premiumModel:  "gpt-4.1",
 			expectedModel: "gpt-4.1", // Premium model
@@ -126,7 +126,7 @@ func TestModelSelection(t *testing.T) {
 			name:          "Mathematical uses standard model",
 			question:      "Calcule 2+2",
 			expectedCat:   CategoryMathematical,
-			webSearch:     false,
+			webSearch:     true, // Web search is now forced on every routing
 			standardModel: "gpt-4o-mini",
 			premiumModel:  "gpt-4.1",
 			expectedModel: "gpt-4o-mini", // Standard model
@@ -227,11 +227,10 @@ func TestOpenRouterWebSearchDoesNotUseOpenAIFallback(t *testing.T) {
 	originalCategoryModels := config.CategoryModels
 
 	admin.SetConfig(admin.RuntimeConfig{
-		BaseSystemPrompt:  config.BaseSystemPrompt,
-		StandardModel:     "openrouter/anthropic/claude-haiku-4.5",
-		PremiumModel:      config.PremiumModel,
-		CategoryModels:    make(map[string]string),
-		PerplexityEnabled: config.PerplexityEnabled,
+		BaseSystemPrompt: config.BaseSystemPrompt,
+		StandardModel:    "openrouter/anthropic/claude-haiku-4.5",
+		PremiumModel:     config.PremiumModel,
+		CategoryModels:   make(map[string]string),
 	})
 
 	decision := Route("Quais as notícias?")
@@ -246,27 +245,24 @@ func TestOpenRouterWebSearchDoesNotUseOpenAIFallback(t *testing.T) {
 	}
 
 	admin.SetConfig(admin.RuntimeConfig{
-		BaseSystemPrompt:  config.BaseSystemPrompt,
-		StandardModel:     originalStandard,
-		PremiumModel:      originalPremium,
-		CategoryModels:    originalCategoryModels,
-		PerplexityEnabled: config.PerplexityEnabled,
+		BaseSystemPrompt: config.BaseSystemPrompt,
+		StandardModel:    originalStandard,
+		PremiumModel:     originalPremium,
+		CategoryModels:   originalCategoryModels,
 	})
 }
 
-func TestClaudeWebSearchDoesNotRequirePerplexity(t *testing.T) {
+func TestClaudeWebSearchUsesNativeProvider(t *testing.T) {
 	config := admin.GetConfig()
 	originalStandard := config.StandardModel
 	originalPremium := config.PremiumModel
 	originalCategoryModels := config.CategoryModels
-	originalPerplexity := config.PerplexityEnabled
 
 	admin.SetConfig(admin.RuntimeConfig{
-		BaseSystemPrompt:  config.BaseSystemPrompt,
-		StandardModel:     "claude-haiku-4-5-20251001",
-		PremiumModel:      config.PremiumModel,
-		CategoryModels:    make(map[string]string),
-		PerplexityEnabled: false,
+		BaseSystemPrompt: config.BaseSystemPrompt,
+		StandardModel:    "claude-haiku-4-5-20251001",
+		PremiumModel:     config.PremiumModel,
+		CategoryModels:   make(map[string]string),
 	})
 
 	decision := Route("Qual as regras de redução de jornada para funcionários públicos do Distrito Federal?")
@@ -281,11 +277,10 @@ func TestClaudeWebSearchDoesNotRequirePerplexity(t *testing.T) {
 	}
 
 	admin.SetConfig(admin.RuntimeConfig{
-		BaseSystemPrompt:  config.BaseSystemPrompt,
-		StandardModel:     originalStandard,
-		PremiumModel:      originalPremium,
-		CategoryModels:    originalCategoryModels,
-		PerplexityEnabled: originalPerplexity,
+		BaseSystemPrompt: config.BaseSystemPrompt,
+		StandardModel:    originalStandard,
+		PremiumModel:     originalPremium,
+		CategoryModels:   originalCategoryModels,
 	})
 }
 
@@ -349,9 +344,13 @@ func TestNegativeKeywords(t *testing.T) {
 			notExpectedCat: CategoryWebSearch,
 		},
 		{
-			name:           "Define news should be factual, not web search",
+			// "O que é uma notícia?" asks for an explAration about a concept,
+			// and "explique"-family weighting routes explain-questions to
+			// complex. The load-bearing assertion is the negative: it must not
+			// trigger a news search.
+			name:           "Define news should not be web search",
 			question:       "O que é uma notícia?",
-			expectedCat:    CategoryFactual,
+			expectedCat:    CategoryComplex,
 			notExpectedCat: CategoryWebSearch,
 		},
 	}
@@ -365,7 +364,7 @@ func TestNegativeKeywords(t *testing.T) {
 			}
 
 			if decision.Category != tt.expectedCat {
-				t.Logf("Expected %s, got %s (may be acceptable)", tt.expectedCat, decision.Category)
+				t.Errorf("Expected %s, got %s", tt.expectedCat, decision.Category)
 			}
 		})
 	}
@@ -458,8 +457,8 @@ func TestTieBreaking(t *testing.T) {
 			decision := Route(tt.question)
 
 			if decision.Category != tt.expectedCat {
-				t.Logf("%s: Expected %s, got %s", tt.description, tt.expectedCat, decision.Category)
-				// Log scores for debugging
+				t.Errorf("%s: Expected %s, got %s", tt.description, tt.expectedCat, decision.Category)
+				// Score dump to diagnose the failure.
 				normalized := Normalize(tt.question)
 				scores := map[Category]float64{
 					CategoryWebSearch:    matchCategory(normalized, CategoryWebSearch) * categoryWeights[CategoryWebSearch],
@@ -500,14 +499,9 @@ func TestNormalizationEdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
 			result := Normalize(tt.input)
-			// Just check it doesn't crash and produces something reasonable
-			if result == "" && tt.input != "" && strings.TrimSpace(tt.input) != "" {
-				// Empty result is only OK if input was empty/whitespace
-				if strings.TrimSpace(tt.input) != "" {
-					t.Logf("Normalize('%s') = '%s' (empty result for non-empty input)", tt.input, result)
-				}
+			if result != tt.expected {
+				t.Errorf("Normalize(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
-			t.Logf("Normalize('%s') = '%s'", tt.input, result)
 		})
 	}
 }

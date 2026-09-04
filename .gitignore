@@ -5,6 +5,8 @@
 *.so
 *.dylib
 /clotilde
+!cmd/clotilde/
+!cmd/clotilde/**
 
 # Test binary, built with `go test -c`
 *.test

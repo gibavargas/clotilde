@@ -90,11 +90,11 @@ func enableOptionalAgentSecrets(cfg *SetupConfig) {
 			ValueEnv:   "OPENROUTER_API_KEY",
 		},
 	}
-	cfg.Perplexity = ProviderConfig{
+	cfg.ZAI = ProviderConfig{
 		Enabled: true,
 		Secret: SecretConfig{
-			SecretName: "clotilde-perplexity",
-			ValueEnv:   "PERPLEXITY_API_KEY",
+			SecretName: "clotilde-zai",
+			ValueEnv:   "ZAI_API_KEY",
 		},
 	}
 	cfg.ConfigAPI = generatedProvider("clotilde-config")

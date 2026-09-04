@@ -101,7 +101,7 @@ if isClaudeModel(route.Model) && s.claudeAPIKey != "" {
 |-----------|--------|-------|--------|
 | Request context | 60s | 25s | Leaves 5s buffer before Shortcuts timeout |
 | OpenAI calls | 60s | 20s | Fits within 25s budget |
-| Perplexity calls | 30s | 8s | Leaves time for OpenAI within budget |
+| Browser harness calls | 30s | 8s | Leaves time for provider-native search within budget |
 | Claude calls | N/A | 15s | Claude is fast, 15s is generous |
 | Cloud Run | 60s | 30s | Matches Shortcuts timeout |
 
@@ -186,7 +186,7 @@ go run cmd/clotilde/main.go
 ## Backward Compatibility
 
 - ✅ OpenAI still works if Claude not configured
-- ✅ Web search still works (uses Perplexity or OpenAI)
+- ✅ Web search still works through provider-native search
 - ✅ Admin dashboard unchanged
 - ✅ All existing API keys still supported
 
@@ -264,4 +264,3 @@ Claude API request: model=claude-haiku-4-5-20251001, max_tokens=500
 **Commit**: feat: Add Claude Haiku 4.5 integration for faster CarPlay responses  
 **Author**: AI Code Assistant  
 **Date**: 2025-12-23
-

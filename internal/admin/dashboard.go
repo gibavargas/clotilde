@@ -748,16 +748,6 @@ const dashboardHTML = `<!DOCTYPE html>
                 </div>
             </div>
 
-            <div class="form-group" style="margin-bottom: 24px;">
-                <label class="form-label" style="display: flex; align-items: center; gap: 12px; cursor: pointer;">
-                    <input type="checkbox" id="perplexityEnabled" style="width: 20px; height: 20px; cursor: pointer; accent-color: var(--accent-cyan);">
-                    <span>Enable Perplexity Search API for Web Search</span>
-                </label>
-                <div class="stat-subtitle" style="margin-top: 8px; margin-left: 32px;">
-                    When enabled, uses Perplexity AI Search API before provider-native web search fallbacks. Enabled by default.
-                </div>
-            </div>
-
             <div class="form-group">
                 <label class="form-label">Base System Prompt (Core Principles)</label>
                 <textarea class="form-control textarea-editor" id="baseSystemPrompt" spellcheck="false"></textarea>

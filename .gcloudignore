@@ -1,4 +1,31 @@
-# Don't ignore source files
-!cmd/
-!internal/
+# Upload only the files needed by Cloud Build/Docker.
+*
+
+!Dockerfile
+!cloudbuild.yaml
+!.dockerignore
 !go.mod
+!go.sum
+
+!cmd/
+!cmd/**
+!internal/
+!internal/**
+!harness/
+!harness/**
+
+# Keep local/private artifacts out even if they match a later include.
+.git
+.git/**
+.env
+.env.*
+*.env
+*.log
+.DS_Store
+**/.DS_Store
+__pycache__/
+**/__pycache__/
+*.pyc
+/clotilde
+.gocache
+.playwright-mcp

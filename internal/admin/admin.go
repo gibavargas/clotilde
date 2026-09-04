@@ -63,6 +63,10 @@ const (
 	maxRequestsPerMinute      = 30
 	bruteForceLockoutDuration = 15 * time.Minute
 
+	// maxTrackedAdminKeys bounds distinct tracked IPs per map (blunts a
+	// memory-exhaustion attempt that rotates source IPs).
+	maxTrackedAdminKeys = 10000
+
 	// Request size limits
 	maxSystemPromptSize = 10 * 1024 // 10KB
 	maxConfigBodySize   = 50 * 1024 // 50KB
@@ -366,11 +370,19 @@ func (rl *adminRateLimiter) recordFailedAuth(ip string) bool {
 	// Add current attempt
 	recentAttempts = append(recentAttempts, now)
 	rl.authAttempts[ip] = recentAttempts
+	if len(rl.authAttempts) > maxTrackedAdminKeys {
+		evictOldest(rl.authAttempts, func(times []time.Time) time.Time {
+			return times[len(times)-1]
+		})
+	}
 
 	// Check if limit exceeded
 	if len(recentAttempts) >= maxAuthAttemptsPerMinute {
 		// Lock out IP
 		rl.lockedIPs[ip] = now.Add(bruteForceLockoutDuration)
+		if len(rl.lockedIPs) > maxTrackedAdminKeys {
+			evictOldest(rl.lockedIPs, func(t time.Time) time.Time { return t })
+		}
 		log.Printf("Admin: IP %s locked out after %d failed auth attempts", ip, len(recentAttempts))
 		return false
 	}
@@ -403,7 +415,44 @@ func (rl *adminRateLimiter) checkRequestRate(ip string) bool {
 	// Add current request
 	recentRequests = append(recentRequests, now)
 	rl.requests[ip] = recentRequests
+	if len(rl.requests) > maxTrackedAdminKeys {
+		evictOldest(rl.requests, func(times []time.Time) time.Time {
+			return times[len(times)-1]
+		})
+	}
 	return true
+}
+
+// ValidateCredentials reports whether the given username/password pair matches
+// the admin configuration, using constant-time comparisons. It returns false
+// when the admin dashboard is not configured, so privileged operations gated
+// on it fail closed. It backs the admin dashboard's Basic Auth and the
+// programmatic POST /api/config path (one credential = one privilege boundary).
+func ValidateCredentials(username, password string) bool {
+	h := defaultAdminHandler()
+	if h == nil || !h.IsEnabled() {
+		return false
+	}
+	userMatch := subtle.ConstantTimeCompare([]byte(username), []byte(h.config.Username)) == 1
+	passMatch := subtle.ConstantTimeCompare([]byte(password), []byte(h.config.Password)) == 1
+	return userMatch && passMatch
+}
+
+// evictOldest deletes the entry with the oldest stamp, keeping the map at a
+// bounded size. O(n) per call, amortized negligible: it only runs on the
+// rare insert that crosses the bound.
+func evictOldest[K comparable, V any](m map[K]V, stamp func(V) time.Time) {
+	var oldestKey K
+	var oldest time.Time
+	for k, v := range m {
+		t := stamp(v)
+		if oldest.IsZero() || t.Before(oldest) {
+			oldestKey, oldest = k, t
+		}
+	}
+	if !oldest.IsZero() {
+		delete(m, oldestKey)
+	}
 }
 
 // IsEnabled returns true if admin is configured
@@ -838,3 +887,28 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 		}
 	}))
 }
+
+// defaultAdminHandler returns the package-default Handler, creating it from
+// the environment on first use. It backs package-level entry points
+// (ValidateCredentials) so credential checks share one source of truth with
+// the dashboard's Basic Auth.
+func defaultAdminHandler() *Handler {
+	hMutex.Lock()
+	defer hMutex.Unlock()
+	if singleton == nil {
+		singleton = NewHandler(logging.GetLogger())
+	}
+	return singleton
+}
+
+// SetDefaultHandler overrides the package-default Handler (used by tests).
+func SetDefaultHandler(h *Handler) {
+	hMutex.Lock()
+	defer hMutex.Unlock()
+	singleton = h
+}
+
+var (
+	hMutex   sync.Mutex
+	singleton *Handler
+)

@@ -7,6 +7,7 @@ Clotilde is designed around low-latency CarPlay use. Configure at least one mode
 1. `CLAUDE_KEY_SECRET_NAME`: Anthropic API key for direct Claude Haiku 4.5. Runtime model: `claude-haiku-4-5-20251001`.
 2. `OPENROUTER_KEY_SECRET_NAME`: OpenRouter API key for hosted provider routing. Runtime model: `openrouter/anthropic/claude-haiku-4.5`.
 3. `OPENAI_KEY_SECRET_NAME`: OpenAI API key for Responses API fallback and native `web_search`.
+4. `ZAI_KEY_SECRET_NAME`: Z.AI API key for GLM chat-completions fallback. Runtime model: `zai/glm-4.7-flash`.
 
 The runtime accepts direct key values in local development. In Cloud Run, the same environment variable names are mounted from Secret Manager by `deploy.sh` or the setup wizard.
 
@@ -21,11 +22,11 @@ OAuth can still sit in front of Clotilde if you expose the service to a GPT Acti
 For time-sensitive requests, Clotilde tries provider-appropriate search:
 
 - Direct Claude: Claude native `web_search_20250305`
-- Perplexity: optional formatted search results injected into the prompt
 - OpenAI: Responses API `web_search`
+- Z.AI: chat-completions `web_search` tool
 - OpenRouter: `openrouter:web_search` server tool
 
-If a configured provider cannot perform search, Clotilde falls back to another configured search-capable provider before returning an error.
+If a configured provider cannot perform search, Clotilde falls back to another configured search-capable provider before returning an error. The optional Camoufox harness can render public result pages when native search fails or returns blocked/JavaScript-gated snippets.
 
 ## Runtime Models
 

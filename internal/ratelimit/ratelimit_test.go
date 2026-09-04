@@ -1,6 +1,7 @@
 package ratelimit
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,6 +10,13 @@ import (
 
 	"github.com/clotilde/carplay-assistant/internal/auth"
 )
+
+// withCloudRun enables the trusted-proxy path (clientip gates header trust on
+// Cloud Run's K_SERVICE env marker).
+func withCloudRun(t *testing.T) {
+	t.Helper()
+	t.Setenv("K_SERVICE", "clotilde")
+}
 
 func TestMiddleware_AllowsFirstRequest(t *testing.T) {
 	handler := Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -85,6 +93,7 @@ func TestMiddleware_AdminRouteBypass(t *testing.T) {
 }
 
 func TestGetClientIP_XForwardedFor(t *testing.T) {
+	withCloudRun(t)
 	req := httptest.NewRequest("POST", "/chat", nil)
 	req.Header.Set("X-Forwarded-For", "192.168.1.1")
 	req.RemoteAddr = "10.0.0.1:12345"
@@ -96,6 +105,7 @@ func TestGetClientIP_XForwardedFor(t *testing.T) {
 }
 
 func TestGetClientIP_XForwardedFor_MultipleIPs(t *testing.T) {
+	withCloudRun(t)
 	// Critical security test: X-Forwarded-For can contain multiple IPs
 	// In Cloud Run: if attacker sends "X-Forwarded-For: 1.2.3.4", Cloud Run appends real IP
 	// Result: "1.2.3.4, <Real-IP>". We must use the RIGHTmost IP (most recent, added by Cloud Run)
@@ -110,6 +120,7 @@ func TestGetClientIP_XForwardedFor_MultipleIPs(t *testing.T) {
 }
 
 func TestGetClientIP_XForwardedFor_WithPort(t *testing.T) {
+	withCloudRun(t)
 	req := httptest.NewRequest("POST", "/chat", nil)
 	req.Header.Set("X-Forwarded-For", "192.168.1.1:8080")
 	req.RemoteAddr = "10.0.0.1:12345"
@@ -121,6 +132,7 @@ func TestGetClientIP_XForwardedFor_WithPort(t *testing.T) {
 }
 
 func TestGetClientIP_XForwardedFor_IPv6(t *testing.T) {
+	withCloudRun(t)
 	req := httptest.NewRequest("POST", "/chat", nil)
 	req.Header.Set("X-Forwarded-For", "[2001:db8::1]:8080")
 	req.RemoteAddr = "127.0.0.1:12345"
@@ -132,6 +144,7 @@ func TestGetClientIP_XForwardedFor_IPv6(t *testing.T) {
 }
 
 func TestGetClientIP_XForwardedFor_IPv6_Multiple(t *testing.T) {
+	withCloudRun(t)
 	req := httptest.NewRequest("POST", "/chat", nil)
 	req.Header.Set("X-Forwarded-For", "[2001:db8::1], [2001:db8::2]")
 	req.RemoteAddr = "127.0.0.1:12345"
@@ -143,6 +156,7 @@ func TestGetClientIP_XForwardedFor_IPv6_Multiple(t *testing.T) {
 }
 
 func TestGetClientIP_XForwardedFor_Whitespace(t *testing.T) {
+	withCloudRun(t)
 	req := httptest.NewRequest("POST", "/chat", nil)
 	req.Header.Set("X-Forwarded-For", "  192.168.1.1  ,  10.0.0.1  ")
 	req.RemoteAddr = "127.0.0.1:12345"
@@ -153,32 +167,37 @@ func TestGetClientIP_XForwardedFor_Whitespace(t *testing.T) {
 	}
 }
 
-func TestGetClientIP_XRealIP(t *testing.T) {
+func TestGetClientIP_XRealIP_Ignored(t *testing.T) {
+	// X-Real-IP is client-controlled and never provisioned by Cloud Run's
+	// GFE, so it must be ignored entirely.
+	withCloudRun(t)
 	req := httptest.NewRequest("POST", "/chat", nil)
 	req.Header.Set("X-Real-IP", "192.168.1.2")
 	req.RemoteAddr = "10.0.0.1:12345"
 
 	ip := getClientIP(req)
-	if ip != "192.168.1.2" {
-		t.Errorf("Expected 192.168.1.2, got %s", ip)
+	if ip != "10.0.0.1" {
+		t.Errorf("X-Real-IP must be ignored; expected RemoteAddr 10.0.0.1, got %s", ip)
 	}
 }
 
-func TestGetClientIP_XRealIP_Precedence(t *testing.T) {
-	// Critical security test: X-Real-IP should take precedence over X-Forwarded-For
-	// X-Real-IP is set by Cloud Run and is more trustworthy
+func TestGetClientIP_XRealIP_NoPrecedenceOverXFF(t *testing.T) {
+	// Critical security test: X-Real-IP (client-set) must NOT take precedence
+	// over the platform-appended rightmost X-Forwarded-For entry.
+	withCloudRun(t)
 	req := httptest.NewRequest("POST", "/chat", nil)
 	req.Header.Set("X-Real-IP", "192.168.1.2")
-	req.Header.Set("X-Forwarded-For", "1.2.3.4, 5.6.7.8") // Spoofed IPs
+	req.Header.Set("X-Forwarded-For", "1.2.3.4, 5.6.7.8")
 	req.RemoteAddr = "10.0.0.1:12345"
 
 	ip := getClientIP(req)
-	if ip != "192.168.1.2" {
-		t.Errorf("Expected 192.168.1.2 (X-Real-IP takes precedence), got %s", ip)
+	if ip != "5.6.7.8" {
+		t.Errorf("Expected rightmost XFF 5.6.7.8 (X-Real-IP ignored), got %s", ip)
 	}
 }
 
 func TestGetClientIP_XForwardedFor_SpoofingScenario(t *testing.T) {
+	withCloudRun(t)
 	// Test the actual attack scenario: attacker sends X-Forwarded-For with spoofed IP
 	// Cloud Run appends real IP, resulting in "spoofed, real-ip"
 	// We must use the rightmost (real) IP
@@ -219,47 +238,37 @@ func TestGetClientIP_XForwardedFor_SpoofingPrevention(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	// Simulate attacker sending unique IPs to bypass rate limit
-	uniqueIPs := []string{"1.1.1.1", "2.2.2.2", "3.3.3.3", "4.4.4.4", "5.5.5.5"}
+	// The attacker can rotate client-supplied XFF entries at will, but the
+	// rightmost entry is the one the platform appends and is stable, so the
+	// pre-auth bucket must be stable too: 16 requests total -> 429 on the 11th.
+	withCloudRun(t)
+	realClientIP := "198.51.100.7"
+	spoofed := []string{"1.1.1.1", "2.2.2.2", "3.3.3.3", "4.4.4.4", "5.5.5.5", "999.999.999.999"}
 
-	// All requests should be rate limited by the same key (API key)
-	// because we use API key, not IP, for rate limiting
-	apiKey := "test-key-spoofing"
-
-	for i, spoofedIP := range uniqueIPs {
+	var rr *httptest.ResponseRecorder
+	for i, spoof := range spoofed {
 		req := httptest.NewRequest("POST", "/chat", nil)
-		req.Header.Set("X-API-Key", apiKey)
-		req.Header.Set("X-Forwarded-For", spoofedIP)
-		rr := httptest.NewRecorder()
-
+		req.Header.Set("X-Forwarded-For", spoof+", "+realClientIP)
+		req.RemoteAddr = "10.0.0.1:12345"
+		rr = httptest.NewRecorder()
 		handler.ServeHTTP(rr, req)
 
-		// First request should succeed
-		if i == 0 {
-			if rr.Code != http.StatusOK {
-				t.Errorf("First request should succeed, got %d", rr.Code)
-			}
+		if i < 10 && rr.Code != http.StatusOK {
+			t.Fatalf("Request %d should succeed (stable platform IP key), got %d", i+1, rr.Code)
 		}
 	}
 
-	// Make 10 more requests with the same API key (should hit rate limit)
-	req := httptest.NewRequest("POST", "/chat", nil)
-	req.Header.Set("X-API-Key", apiKey)
-	req.Header.Set("X-Forwarded-For", "999.999.999.999") // Different IP, same key
-	rr := httptest.NewRecorder()
-
-	// Make requests to exhaust rate limit
+	// Exhaust: keep rotating the spoofed leftmost entries; the bucket must hold.
 	for i := 0; i < 10; i++ {
+		req := httptest.NewRequest("POST", "/chat", nil)
+		req.Header.Set("X-Forwarded-For", fmt.Sprintf("10.9.9.%d, %s", i, realClientIP))
+		req.RemoteAddr = "10.0.0.1:12345"
 		rr = httptest.NewRecorder()
 		handler.ServeHTTP(rr, req)
 	}
 
-	// Next request should be rate limited (11th request)
-	rr = httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
 	if rr.Code != http.StatusTooManyRequests {
-		t.Errorf("Expected rate limit after 11 requests with same API key, got %d", rr.Code)
+		t.Errorf("Expected 429 once the single real-IP bucket is exhausted, got %d", rr.Code)
 	}
 }
 
@@ -268,12 +277,16 @@ func TestGetClientIP_ConcurrentAccess(t *testing.T) {
 	var wg sync.WaitGroup
 	results := make(chan string, 100)
 
+	// All should return the same IP: the rightmost parseable XFF entry
+	// (the one the trusted platform appends on Cloud Run).
+	t.Setenv("K_SERVICE", "clotilde") // enable the trusted-proxy path
 	for i := 0; i < 100; i++ {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
 			req := httptest.NewRequest("POST", "/chat", nil)
-			req.Header.Set("X-Forwarded-For", "192.168.1.1")
+			req.Header.Set("X-Forwarded-For", "198.51.100.1, 192.168.1.1")
+			req.RemoteAddr = "10.0.0.1:1234"
 			ip := getClientIP(req)
 			results <- ip
 		}(i)
@@ -282,7 +295,6 @@ func TestGetClientIP_ConcurrentAccess(t *testing.T) {
 	wg.Wait()
 	close(results)
 
-	// All should return the same IP
 	for ip := range results {
 		if ip != "192.168.1.1" {
 			t.Errorf("Expected 192.168.1.1, got %s", ip)

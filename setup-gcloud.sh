@@ -107,35 +107,6 @@ else
     echo "✓ Clotilde API key secret already exists ($API_SECRET)"
 fi
 
-# Perplexity API Key (optional)
-export PERPLEXITY_SECRET="my-perplexity-key-$(openssl rand -hex 4)"
-if ! gcloud secrets describe $PERPLEXITY_SECRET &>/dev/null; then
-    echo ""
-    echo "Perplexity API Key (optional - for web search):"
-    echo -n "Enter your Perplexity API key (or press Enter to skip): "
-    read -s PERPLEXITY_KEY
-    echo ""
-    if [ ! -z "$PERPLEXITY_KEY" ]; then
-        # Use temporary file to avoid secrets in shell history
-        TEMP_FILE=$(mktemp)
-        trap "rm -f $TEMP_FILE" EXIT
-        printf '%s' "$PERPLEXITY_KEY" > "$TEMP_FILE"
-        gcloud secrets create $PERPLEXITY_SECRET \
-            --data-file="$TEMP_FILE" \
-            --replication-policy="automatic" \
-            --quiet
-        rm -f "$TEMP_FILE"
-        trap - EXIT
-        echo "✓ Perplexity API key secret created ($PERPLEXITY_SECRET)"
-        echo "PERPLEXITY_SECRET=$PERPLEXITY_SECRET"
-    else
-        echo "✓ Perplexity API key skipped (Perplexity Search API will be disabled)"
-        PERPLEXITY_SECRET=""
-    fi
-else
-    echo "✓ Perplexity API key secret already exists ($PERPLEXITY_SECRET)"
-fi
-
 # Get Cloud Run service account
 echo ""
 echo "Configuring IAM permissions..."
@@ -152,15 +123,7 @@ gcloud secrets add-iam-policy-binding $API_SECRET \
     --role="roles/secretmanager.secretAccessor" \
     --quiet
 
-if [ ! -z "$PERPLEXITY_SECRET" ]; then
-    gcloud secrets add-iam-policy-binding $PERPLEXITY_SECRET \
-        --member="serviceAccount:$SERVICE_ACCOUNT" \
-        --role="roles/secretmanager.secretAccessor" \
-        --quiet
-    echo "✓ IAM permissions configured for $OPENAI_SECRET, $API_SECRET, and $PERPLEXITY_SECRET"
-else
-    echo "✓ IAM permissions configured for $OPENAI_SECRET and $API_SECRET"
-fi
+echo "✓ IAM permissions configured for $OPENAI_SECRET and $API_SECRET"
 
 # Configure Docker authentication
 echo ""
@@ -174,4 +137,3 @@ echo ""
 echo "Next steps:"
 echo "1. Build and deploy: ./deploy.sh"
 echo "2. Get service URL: gcloud run services describe $SERVICE_NAME --region $REGION --format='value(status.url)'"
-

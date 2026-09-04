@@ -184,7 +184,7 @@ func TestMiddleware_NonChatRoutesBypass(t *testing.T) {
 		{name: "health", method: "GET", path: "/health"},
 		{name: "admin", method: "GET", path: "/admin/dashboard"},
 		{name: "api config get", method: "GET", path: "/api/config"},
-		{name: "api config post", method: "POST", path: "/api/config", body: `{"perplexity_enabled":false}`},
+		{name: "api config post", method: "POST", path: "/api/config", body: `{"category_models":{}}`},
 		{name: "not found route", method: "GET", path: "/unknown"},
 	}
 

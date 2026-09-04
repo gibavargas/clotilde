@@ -75,6 +75,9 @@ func validateConfig(cfg SetupConfig) error {
 	if cfg.LogBufferSize < 0 {
 		problems = append(problems, "log_buffer_size must be non-negative")
 	}
+	if cfg.MinInstances < 0 {
+		problems = append(problems, "min_instances must be non-negative")
+	}
 
 	if isSecretConfigured(cfg.OpenAI) {
 		problems = append(problems, validateExternalSecret("openai", cfg.OpenAI)...)
@@ -82,10 +85,10 @@ func validateConfig(cfg SetupConfig) error {
 	problems = append(problems, validateSecret("api", cfg.API, true)...)
 	problems = append(problems, validateExternalProvider("claude", cfg.Claude)...)
 	problems = append(problems, validateExternalProvider("openrouter", cfg.OpenRouter)...)
-	problems = append(problems, validateExternalProvider("perplexity", cfg.Perplexity)...)
+	problems = append(problems, validateExternalProvider("z_ai", cfg.ZAI)...)
 	problems = append(problems, validateProvider("config_api", cfg.ConfigAPI)...)
-	if !isSecretConfigured(cfg.OpenAI) && !cfg.Claude.Enabled && !cfg.OpenRouter.Enabled {
-		problems = append(problems, "at least one AI provider is required: openai, claude, or openrouter")
+	if !isSecretConfigured(cfg.OpenAI) && !cfg.Claude.Enabled && !cfg.OpenRouter.Enabled && !cfg.ZAI.Enabled {
+		problems = append(problems, "at least one AI provider is required: openai, claude, openrouter, or z_ai")
 	}
 
 	if cfg.Admin.Enabled {
@@ -212,8 +215,8 @@ func secretInventory(cfg SetupConfig) map[string]string {
 	if cfg.OpenRouter.Enabled {
 		secrets["openrouter"] = cfg.OpenRouter.Secret.SecretName
 	}
-	if cfg.Perplexity.Enabled {
-		secrets["perplexity"] = cfg.Perplexity.Secret.SecretName
+	if cfg.ZAI.Enabled {
+		secrets["z_ai"] = cfg.ZAI.Secret.SecretName
 	}
 	if cfg.ConfigAPI.Enabled {
 		secrets["config_api"] = cfg.ConfigAPI.Secret.SecretName
@@ -235,14 +238,14 @@ func orderedSecretNames(cfg SetupConfig) []string {
 	if cfg.ConfigAPI.Enabled {
 		secrets = append(secrets, cfg.ConfigAPI.Secret.SecretName)
 	}
-	if cfg.Perplexity.Enabled {
-		secrets = append(secrets, cfg.Perplexity.Secret.SecretName)
-	}
 	if cfg.Claude.Enabled {
 		secrets = append(secrets, cfg.Claude.Secret.SecretName)
 	}
 	if cfg.OpenRouter.Enabled {
 		secrets = append(secrets, cfg.OpenRouter.Secret.SecretName)
+	}
+	if cfg.ZAI.Enabled {
+		secrets = append(secrets, cfg.ZAI.Secret.SecretName)
 	}
 	return secrets
 }

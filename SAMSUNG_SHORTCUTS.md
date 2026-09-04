@@ -261,7 +261,7 @@ or
 
 ### Reduce Response Time
 
-1. **Use Fast Models**: Clotilde defaults to Claude Haiku 4.5 (1-3s response)
+1. **Use Fast Models**: Clotilde defaults to Cerebras `gemma-4-31b` (1-3s response, web-grounded via the Go search harness)
 2. **Keep Questions Simple**: Shorter questions = faster responses
 3. **Avoid Web Search**: Factual questions are faster than web searches
 4. **Check Network**: Use LTE/5G, not slow 3G
@@ -270,10 +270,10 @@ or
 
 | Query Type | Expected Time | Model Used |
 |------------|---------------|------------|
-| Simple factual | 2-4 seconds | Claude Haiku 4.5 |
-| Complex analysis | 4-8 seconds | Claude Haiku 4.5 |
-| Web search | 9-12 seconds | Perplexity + Claude |
-| Math/calculations | 2-4 seconds | Claude Haiku 4.5 |
+| Simple factual | 2-4 seconds | gemma-4-31b (Cerebras) |
+| Complex analysis | 4-8 seconds | gemma-4-31b (Cerebras) |
+| Web search | 8-12 seconds | Provider-native search |
+| Math/calculations | 2-4 seconds | gemma-4-31b (Cerebras) |
 
 **Note**: Android Auto has ~30s timeout (same as Apple CarPlay)
 
@@ -463,7 +463,7 @@ https://clotilde-zxymv6mlja-uc.a.run.app/admin/
 - ✅ Enhanced Portuguese language support
 
 **v1.5** - November 2025
-- Added Perplexity web search integration
+- Added web search integration
 - Improved error handling
 - Added rate limiting
 
@@ -474,7 +474,7 @@ https://clotilde-zxymv6mlja-uc.a.run.app/admin/
 ### Optimize for Speed
 
 1. **Keep questions concise**: "Weather tomorrow?" instead of "Can you please tell me what the weather will be like tomorrow in my location?"
-2. **Use fast models**: Default is already optimized (Claude Haiku 4.5)
+2. **Use fast models**: Default is already optimized (gemma-4-31b via Cerebras)
 3. **Avoid complex analysis**: Save deep questions for when not driving
 4. **Prefer facts over searches**: "Capital of France?" is faster than "Latest news in France?"
 
@@ -521,4 +521,3 @@ Share your setup with the community!
 ---
 
 **Made with ❤️ for Samsung Galaxy and Android Auto users**
-

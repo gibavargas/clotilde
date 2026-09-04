@@ -10,7 +10,8 @@ A voice-activated CarPlay assistant centered on Claude Haiku for low-latency Car
 - ⚡ Claude Haiku 4.5 direct API as the recommended primary model path
 - 🧭 OpenRouter fallback for OpenAI-compatible access to Claude Haiku and other hosted models
 - 🧠 Optional OpenAI Responses API fallback with native `web_search`
-- 🔍 **Perplexity AI Search API integration** - Optional search provider with toggle control
+- 🌐 Optional Z.AI GLM fallback through OpenAI-compatible chat completions
+- 🔍 Provider-native web search plus optional Camoufox rendering fallback
 - 🇧🇷 Brazilian Portuguese responses (default)
 - 🔒 Security-first design with API key authentication, rate limiting, and input validation
 - 💰 Free tier optimized (Google Cloud Artifact Registry + Cloud Run)
@@ -32,7 +33,7 @@ A voice-activated CarPlay assistant centered on Claude Haiku for low-latency Car
 - Google Cloud CLI (gcloud) installed and configured
 - Go 1.21+ installed
 - Docker installed (for local testing)
-- One upstream model key: Anthropic Claude API key, OpenRouter API key, or OpenAI API key
+- One upstream model key: Anthropic Claude API key, OpenRouter API key, OpenAI API key, or Z.AI API key
 - Apple iPhone with Shortcuts app
 
 ## Provider Strategy
@@ -42,6 +43,7 @@ Clotilde is optimized for fast spoken answers. The recommended setup is:
 1. **Primary**: Claude Haiku 4.5 via Anthropic API (`CLAUDE_KEY_SECRET_NAME`)
 2. **Fallback / aggregator**: OpenRouter (`OPENROUTER_KEY_SECRET_NAME`) using `openrouter/anthropic/claude-haiku-4.5`
 3. **Search fallback**: OpenAI Responses API (`OPENAI_KEY_SECRET_NAME`) when you want native OpenAI `web_search`
+4. **GLM fallback**: Z.AI (`ZAI_KEY_SECRET_NAME`) using `zai/glm-4.7-flash`, `zai/glm-4.7`, or `zai/glm-5.1`
 
 OpenAI OAuth is not used for server-to-server calls to the OpenAI API. The backend sends `Authorization: Bearer ...`; for OpenAI’s API this should be a server-side API key. If you expose Clotilde through a GPT Action or another user-facing OpenAI OAuth flow, keep that OAuth layer in front of this service and continue protecting `/chat` with Clotilde’s own `X-API-Key`.
 
@@ -115,7 +117,7 @@ Minimal `setup.json` shape:
 }
 ```
 
-The wizard accepts optional `openai`, `openrouter`, `perplexity`, and `config_api` sections. At least one model provider (`claude`, `openrouter`, or `openai`) must be configured.
+The wizard accepts optional `openai`, `openrouter`, `z_ai`, and `config_api` sections. At least one model provider (`claude`, `openrouter`, `openai`, or `z_ai`) must be configured.
 
 The runtime `/api/config` endpoint is protected by the same service `X-API-Key` used for `/chat`. The `config_api` section is currently only a generated handoff secret for agent workflows that need it in `.clotilde/setup-result.json`.
 
@@ -148,7 +150,7 @@ chmod +x deploy.sh
 ./deploy.sh
 ```
 
-`API_SECRET` is the service authentication key secret name. `CLAUDE_SECRET`, `OPENROUTER_SECRET`, and `OPENAI_SECRET` are upstream provider secret names; set at least one. Inside Cloud Run, they are mounted as `API_KEY_SECRET_NAME`, `CLAUDE_KEY_SECRET_NAME`, `OPENROUTER_KEY_SECRET_NAME`, and `OPENAI_KEY_SECRET_NAME`.
+`API_SECRET` is the service authentication key secret name. `CLAUDE_SECRET`, `OPENROUTER_SECRET`, `OPENAI_SECRET`, and `ZAI_SECRET` are upstream provider secret names; set at least one. Inside Cloud Run, they are mounted as `API_KEY_SECRET_NAME`, `CLAUDE_KEY_SECRET_NAME`, `OPENROUTER_KEY_SECRET_NAME`, `OPENAI_KEY_SECRET_NAME`, and `ZAI_KEY_SECRET_NAME`.
 
 #### Cloud Build (Deprecated)
 
@@ -186,9 +188,9 @@ The `.env` file should contain:
 - `CLAUDE_KEY_SECRET_NAME`: Your Anthropic API key for Claude Haiku direct API
 - `OPENROUTER_KEY_SECRET_NAME`: Optional OpenRouter API key
 - `OPENAI_KEY_SECRET_NAME`: Optional OpenAI API key for Responses fallback
+- `ZAI_KEY_SECRET_NAME`: Optional Z.AI API key for GLM chat-completions fallback
 - `GOOGLE_CLOUD_PROJECT`: Your Google Cloud project ID
 - `SERVICE_URL`: Your deployed service URL (optional, for testing)
-- `PERPLEXITY_KEY_SECRET_NAME`: Optional Perplexity Search API key
 
 #### Admin Dashboard (Optional)
 
@@ -296,64 +298,32 @@ X-API-Key: your-api-key
 
 ### Web Search Providers
 
-Clotilde can ground time-sensitive answers through provider-native search or through Perplexity. The order is:
+Clotilde grounds time-sensitive and factual answers through the selected provider's native web-search tool whenever possible. The search-capable paths are:
 
 1. Claude direct API uses Claude's native `web_search_20250305` tool when configured.
-2. Perplexity can be enabled as an explicit search-results provider.
-3. An optional Camoufox browser harness can render Perplexity result pages when snippets look blocked or JavaScript-gated.
-4. OpenAI Responses falls back to native `web_search` when an OpenAI key is configured.
-5. OpenRouter falls back to the `openrouter:web_search` server tool when an OpenRouter key is configured.
-
-Perplexity is useful when you want search results formatted into the prompt before generation. When enabled, Perplexity provides web search results that are formatted and included in the system prompt for the selected model.
+2. OpenAI Responses uses native `web_search` when an OpenAI key is configured.
+3. Z.AI chat completions uses the `web_search` tool when a Z.AI key is configured.
+4. OpenRouter uses the `openrouter:web_search` server tool when an OpenRouter key is configured.
+5. An optional Camoufox browser harness can render public search result pages when native search fails or returns blocked/JavaScript-gated snippets.
 
 #### Features
 
-- **Toggle Control**: Enable/disable Perplexity via admin dashboard or API (enabled by default)
-- **Automatic Fallback**: Falls back to OpenAI or OpenRouter web search if Perplexity fails and those keys are configured
-- **Language Filtering**: Automatically filters results by language (Portuguese for Brazilian queries)
-- **Result Formatting**: Search results are formatted and explained in the system prompt
-- **Optional Browser Rendering**: Uses a configured Camoufox runner only when search snippets suggest bot/JavaScript blocking, or always when explicitly configured
-
-#### Setup
-
-1. **Create Perplexity API Key Secret**:
-   ```bash
-   export PERPLEXITY_SECRET="my-perplexity-key-$(openssl rand -hex 4)"
-   echo -n "YOUR_PERPLEXITY_API_KEY_HERE" | gcloud secrets create $PERPLEXITY_SECRET \
-       --data-file=- \
-       --replication-policy="automatic"
-   ```
-
-2. **Grant Access**:
-   ```bash
-   gcloud secrets add-iam-policy-binding $PERPLEXITY_SECRET \
-       --member="serviceAccount:${SERVICE_ACCOUNT}" \
-       --role="roles/secretmanager.secretAccessor"
-   ```
-
-3. **Set Environment Variable**:
-   ```bash
-   export PERPLEXITY_SECRET_NAME=$PERPLEXITY_SECRET
-   ```
-   `deploy.sh` reads `PERPLEXITY_SECRET_NAME` as the Secret Manager secret name. If you deploy with `gcloud run deploy` directly, mount that secret as the runtime environment variable `PERPLEXITY_KEY_SECRET_NAME`.
-
-4. **Configure via Admin Dashboard**:
-   - Navigate to `/admin/` in your browser
-   - Toggle "Enable Perplexity Search API for Web Search" on/off
-   - Changes take effect immediately
+- **Provider-native search**: Uses each configured model API's own search tool rather than a separate search API key.
+- **Factual validation**: Router marks factual and web-search categories with `web_search=true`, so changeable facts are validated before the answer is spoken.
+- **Automatic fallback**: If the selected provider cannot search or native search fails, Clotilde tries another configured search-capable provider.
+- **Optional browser rendering**: Uses a configured Camoufox runner when native search snippets suggest bot/JavaScript blocking, or always when explicitly configured.
 
 #### How It Works
 
-When Perplexity is enabled and a web search query is detected:
-1. Perplexity Search API is called with the user's query
-2. Results are formatted with titles, URLs, and snippets
-3. Formatted results are appended to the system prompt with explanation
-4. The selected model uses these results to generate the response
-5. If Perplexity fails, Clotilde automatically falls back to provider-native web search when OpenAI or OpenRouter is configured
+When a factual or web-search query is detected:
+1. The router selects the fastest configured provider that can handle the category.
+2. The provider receives its native web-search tool configuration.
+3. If native search fails or looks blocked, Camoufox can fetch public search result pages and compact visible evidence into the prompt.
+4. The selected model answers using the validated context within the active CarPlay request budget.
 
 #### Optional Camoufox Browser Harness
 
-For pages that return thin snippets such as "enable JavaScript", "access denied", or "please verify you are not a robot", Clotilde can call an external Camoufox runner after Perplexity returns URLs. This is off by default because it adds latency and requires a browser runtime.
+For pages that return thin snippets such as "enable JavaScript", "access denied", or "please verify you are not a robot", Clotilde can call an external Camoufox runner to search and render public result pages. This is off by default because it adds latency and requires a browser runtime.
 
 Install the optional runner dependencies in the environment that will execute the harness:
 
@@ -371,11 +341,11 @@ export CAMOUFOX_HARNESS_ENABLED=true
 export CAMOUFOX_HARNESS_CMD=python3
 export CAMOUFOX_HARNESS_ARGS=harness/camoufox_fetch.py
 export CAMOUFOX_HARNESS_MODE=blocked   # blocked or always
-export CAMOUFOX_HARNESS_MAX_PAGES=3
-export CAMOUFOX_HARNESS_TIMEOUT_SECONDS=12
+export CAMOUFOX_HARNESS_MAX_PAGES=2
+export CAMOUFOX_HARNESS_TIMEOUT_SECONDS=8
 ```
 
-The runner only opens public URLs already returned by Perplexity and extracts visible text. It does not solve CAPTCHAs, submit forms, use credentials, or click through access walls.
+The runner only opens public URLs and extracts visible text. It does not solve CAPTCHAs, submit forms, use credentials, or click through access walls. Clotilde also caps the harness against the active CarPlay request budget so browser rendering cannot consume the whole answer window.
 
 ### Configuration API
 
@@ -405,7 +375,6 @@ X-API-Key: your-api-key
   },
   "standard_model": "claude-haiku-4-5-20251001",
   "premium_model": "claude-haiku-4-5-20251001",
-  "perplexity_enabled": true,
   "category_models": {}
 }
 ```
@@ -432,7 +401,6 @@ X-API-Key: your-api-key
   },
   "standard_model": "openrouter/anthropic/claude-haiku-4.5",
   "premium_model": "claude-haiku-4-5-20251001",
-  "perplexity_enabled": true,
   "category_models": {
     "web_search": "openrouter/anthropic/claude-haiku-4.5"
   }
@@ -446,34 +414,38 @@ X-API-Key: your-api-key
   "category_prompts": {...},
   "standard_model": "openrouter/anthropic/claude-haiku-4.5",
   "premium_model": "claude-haiku-4-5-20251001",
-  "perplexity_enabled": true,
   "category_models": {...}
 }
 ```
 
-**Example: Toggle Perplexity Search API**
+**Example: Route Factual Search Through Z.AI**
 
-To enable Perplexity:
 ```bash
 curl -X POST https://your-service-url.run.app/api/config \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your-api-key" \
   -d '{
-    "perplexity_enabled": true
+    "category_models": {
+      "factual": "zai/glm-4.7-flash",
+      "web_search": "zai/glm-4.7-flash"
+    }
   }'
 ```
 
-To disable Perplexity and use provider-native web search instead:
+**Example: Route Web Search Through OpenRouter**
+
 ```bash
 curl -X POST https://your-service-url.run.app/api/config \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your-api-key" \
   -d '{
-    "perplexity_enabled": false
+    "category_models": {
+      "web_search": "openrouter/anthropic/claude-haiku-4.5"
+    }
   }'
 ```
 
-Note: You can update just the `perplexity_enabled` field without changing other settings. The API will merge your changes with the existing configuration.
+Note: You can update just `category_models` without changing other settings. The API will merge your changes with the existing configuration.
 
 **Response (Error):**
 ```json
@@ -487,6 +459,7 @@ Note: You can update just the `perplexity_enabled` field without changing other 
 - Maximum prompt size: 10KB per prompt
 - Maximum request body size: 50KB
 - Models must be valid provider model IDs. OpenRouter models use the `openrouter/<provider>/<model>` prefix, for example `openrouter/anthropic/claude-haiku-4.5`.
+- Z.AI models use the `zai/<model>` prefix, for example `zai/glm-4.7-flash` or `zai/glm-5.1`. For factual/web-search routes, Clotilde uses the native Z.AI web-search tool and can fall back to Camoufox evidence when browser rendering is enabled.
 - Changes take effect immediately for all new requests
 
 **Status Codes:**
@@ -525,7 +498,7 @@ The admin dashboard provides a web-based interface for monitoring your Clotilde 
 |----------|-------------|---------------|
 | `POST /chat` | Chat endpoint for AI responses | X-API-Key |
 | `GET /api/config` | Get current runtime configuration (system prompt, models) | X-API-Key |
-| `POST /api/config` | Update runtime configuration without redeployment | X-API-Key |
+| `POST /api/config` | Update runtime configuration without redeployment | Admin Basic Auth ( privilege-separated from the /chat API key; fail-closed when admin unset) |
 | `GET /admin/` | Dashboard HTML page | HTTP Basic Auth |
 | `GET /admin/logs` | JSON API for log entries (supports pagination and filtering) | HTTP Basic Auth |
 | `GET /admin/stats` | JSON API for aggregated statistics | HTTP Basic Auth |
@@ -565,7 +538,7 @@ curl -X POST https://your-service-url.run.app/api/config \
 - **Premium Model**: Model for complex queries (e.g., `claude-haiku-4-5-20251001`, `openrouter/anthropic/claude-haiku-4.5`, `gpt-4.1`)
 - **System Prompts**: AI personality and behavior instructions
 - **Category Models**: Override models for specific query types (web search, creative, etc.)
-- **Perplexity Integration**: Enable/disable web search via Perplexity API
+- **Search Routing**: Choose which configured provider handles factual and web-search categories
 
 #### Example: Fix Timeout Issues by Switching to Faster Models
 
@@ -614,6 +587,7 @@ See [docs/SECURITY.md](docs/SECURITY.md) for detailed security documentation.
 - **Docker Image**: ~14.9MB (Alpine-based)
 - **Memory**: 256MB (Cloud Run minimum)
 - **CPU**: 1 vCPU
+- **Cold starts**: deploy defaults keep `MIN_INSTANCES=0` so Cloud Run can scale to zero when idle. Startup CPU boost is enabled, and the server keeps cold-start work small; if a car/phone shortcut can run a lightweight pre-wake request, call `GET /health` shortly before `POST /chat`.
 - **Artifact Registry**: Free tier (0.5GB storage, 1GB egress/month)
 
 ## Troubleshooting

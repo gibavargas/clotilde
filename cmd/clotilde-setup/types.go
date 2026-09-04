@@ -11,11 +11,12 @@ type SetupConfig struct {
 	RepoName       string         `json:"repo_name"`
 	ImageTag       string         `json:"image_tag,omitempty"`
 	LogBufferSize  int            `json:"log_buffer_size,omitempty"`
+	MinInstances   int            `json:"min_instances,omitempty"`
 	OpenAI         SecretConfig   `json:"openai"`
 	API            SecretConfig   `json:"api"`
 	Claude         ProviderConfig `json:"claude,omitempty"`
 	OpenRouter     ProviderConfig `json:"openrouter,omitempty"`
-	Perplexity     ProviderConfig `json:"perplexity,omitempty"`
+	ZAI            ProviderConfig `json:"z_ai,omitempty"`
 	ConfigAPI      ProviderConfig `json:"config_api,omitempty"`
 	Admin          AdminConfig    `json:"admin,omitempty"`
 }

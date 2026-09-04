@@ -136,7 +136,7 @@ CarPlay compatibility: VERIFIED
 
 ### Warning Signs
 - ⚠️ Response times 10-20s (Claude should be faster)
-- ⚠️ Web search queries > 20s (check Perplexity API)
+- ⚠️ Web search queries > 20s (check provider-native search and Camoufox fallback)
 - ⚠️ High error rate (check API keys)
 
 ### Failure Scenarios
@@ -212,10 +212,13 @@ API_KEY=$(gcloud secrets versions access latest --secret=clotilde-api-key)
 
 ## Continuous Testing
 
-### GitHub Actions (if configured)
-Tests run automatically on:
-- Every push to main
-- Pull requests
+There is **no CI pipeline** in this repository (no `.github/workflows`). Tests
+only run where someone runs them:
+
+- Before deploying: run `go test ./...` locally (required by .cursorrules)
+- After deploying: run `test_timing.sh` against production
+
+If you add CI later, update this section.
 
 ### Manual testing schedule
 - Before deploying: Run all tests locally
@@ -251,4 +254,3 @@ If tests show slow response times:
 - [Clotilde GitHub Issues](https://github.com/gibavargas/clotilde/issues)
 - [CHANGELOG_CLAUDE.md](./CHANGELOG_CLAUDE.md) - Detailed integration notes
 - [Apple Shortcuts Timeout Limits](https://developer.apple.com/documentation/shortcuts)
-

@@ -79,8 +79,10 @@ func TestSetConfig_ValidModels(t *testing.T) {
 		{"gpt-5 series", "gpt-5-mini", "gpt-5.1", true},
 		{"o-series", "o1-mini", "o3", true},
 		{"openrouter slug", "openrouter/anthropic/claude-haiku-4.5", "openrouter/openai/gpt-5.2", true},
+		{"zai slug", "zai/glm-4.7-flash", "zai/glm-5.1", true},
 		{"invalid standard", "invalid-model", "gpt-4o", false},
 		{"invalid openrouter slug", "openrouter/not-enough", "gpt-4o", false},
+		{"invalid zai slug", "zai/glm-4.7/extra", "gpt-4o", false},
 		{"invalid premium", "gpt-4o-mini", "invalid-model", false},
 		{"both invalid", "invalid-1", "invalid-2", false},
 	}

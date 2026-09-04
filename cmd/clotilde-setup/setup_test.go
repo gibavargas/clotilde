@@ -48,11 +48,11 @@ func validTestConfig() SetupConfig {
 				Value:      "test-openrouter-secret",
 			},
 		},
-		Perplexity: ProviderConfig{
+		ZAI: ProviderConfig{
 			Enabled: true,
 			Secret: SecretConfig{
-				SecretName: "clotilde-perplexity-test",
-				Value:      "test-perplexity-secret",
+				SecretName: "clotilde-zai-test",
+				Value:      "test-zai-secret",
 			},
 		},
 		ConfigAPI: ProviderConfig{
@@ -85,6 +85,16 @@ func TestValidateConfigInvalidSecretName(t *testing.T) {
 	}
 }
 
+func TestValidateConfigRejectsNegativeMinInstances(t *testing.T) {
+	cfg := validTestConfig()
+	cfg.MinInstances = -1
+
+	err := validateConfig(cfg)
+	if err == nil || !strings.Contains(err.Error(), "min_instances must be non-negative") {
+		t.Fatalf("expected min_instances validation error, got %v", err)
+	}
+}
+
 func TestValidateConfigAdminRequiresUsernameAndPasswordSource(t *testing.T) {
 	cfg := validTestConfig()
 	cfg.Admin.Username = ""
@@ -106,7 +116,7 @@ func TestValidateConfigOptionalProvidersCanBeDisabled(t *testing.T) {
 	cfg := validTestConfig()
 	cfg.Claude = ProviderConfig{}
 	cfg.OpenRouter = ProviderConfig{}
-	cfg.Perplexity = ProviderConfig{}
+	cfg.ZAI = ProviderConfig{}
 	cfg.ConfigAPI = ProviderConfig{}
 
 	if err := validateConfig(cfg); err != nil {
@@ -119,6 +129,7 @@ func TestValidateConfigRequiresAtLeastOneAIProvider(t *testing.T) {
 	cfg.OpenAI = SecretConfig{}
 	cfg.Claude = ProviderConfig{}
 	cfg.OpenRouter = ProviderConfig{}
+	cfg.ZAI = ProviderConfig{}
 
 	err := validateConfig(cfg)
 	if err == nil || !strings.Contains(err.Error(), "at least one AI provider is required") {
@@ -231,9 +242,9 @@ func TestDryRunCommandPlanningAndRedaction(t *testing.T) {
 		"API_KEY_SECRET_NAME=clotilde-auth-test:latest",
 		"ADMIN_PASSWORD=clotilde-admin-test:latest",
 		"CONFIG_API_KEY=clotilde-config-test:latest",
-		"PERPLEXITY_KEY_SECRET_NAME=clotilde-perplexity-test:latest",
 		"CLAUDE_KEY_SECRET_NAME=clotilde-claude-test:latest",
 		"OPENROUTER_KEY_SECRET_NAME=clotilde-openrouter-test:latest",
+		"ZAI_KEY_SECRET_NAME=clotilde-zai-test:latest",
 		"ADMIN_USER=admin",
 	} {
 		if !strings.Contains(deployJoined, expected) {
@@ -242,7 +253,7 @@ func TestDryRunCommandPlanningAndRedaction(t *testing.T) {
 	}
 
 	output := stdout.String()
-	for _, secretValue := range []string{"test-openai-secret", "admin-password", "test-claude-secret", "test-openrouter-secret", "test-perplexity-secret", "config-key"} {
+	for _, secretValue := range []string{"test-openai-secret", "admin-password", "test-claude-secret", "test-openrouter-secret", "test-zai-secret", "config-key"} {
 		if strings.Contains(output, secretValue) {
 			t.Fatalf("stdout leaked secret value %q", secretValue)
 		}
@@ -253,7 +264,7 @@ func TestDryRunCLIProducesJSON(t *testing.T) {
 	cfg := validTestConfig()
 	cfg.Claude = ProviderConfig{}
 	cfg.OpenRouter = ProviderConfig{}
-	cfg.Perplexity = ProviderConfig{}
+	cfg.ZAI = ProviderConfig{}
 	cfg.ConfigAPI = ProviderConfig{}
 
 	tmp := t.TempDir()

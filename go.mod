@@ -1,6 +1,6 @@
 module github.com/clotilde/carplay-assistant
 
-go 1.25
+go 1.26
 
 require (
 	cloud.google.com/go/logging v1.10.0
