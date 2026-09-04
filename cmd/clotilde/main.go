@@ -972,12 +972,18 @@ type SearchResult struct {
 // Portuguese) and the evidence envelope markers themselves, so third-party
 // page text cannot smuggle prompt-level directives or spoof the data block.
 // Compiled once at package level, like every other regexp here.
+// bridge separates tokens inside an injection phrase: whitespace and/or
+// punctuation (commas, periods, hyphens) — so "Ignore. All previous
+// instructions" still matches.
+const evidenceBridge = `[\s,.;:!?~-]+`
+
 var evidenceInjectionPatterns = regexp.MustCompile(
-	`(?i)(ignore|desconsidere|desobede[çc]?a?)[a-zç]*\s+((all|todas(\s+as)?)\s+)?((previous|prior|above|anteriores?)\s+)?(instructions?|instru[çc][õo]es|regras|rules)` +
-		`|(disregard|forget)\s+(all\s+)?(previous\s+|prior\s+|your\s+)?(instructions?|prompt|regras)` +
-		`|(you are now|from now on you are|act as|behave as|pretend to be|finja que|aja como|você agora [ée])` +
-		`|(reveal|show|print|repeat|expose)\s+(your\s+|the\s+|o\s+|seu\s+)?(system\s+)?(prompt|instructions?|diretrizes|prompt do sistema|instru[çc][õo]es do sistema)` +
-		`|(revele|mostre|imprima|repita)\s+(seu\s+|o\s+)?(prompt(\s+do\s+sistema)?|instru[çc][õo]es(\s+do\s+sistema)?|diretrizes)` +
+	`(?i)(ignore|desconsidere|desobede[çc]?a?|obede[çc]?a|siga|follow|respeite)[a-zç]*` + evidenceBridge + `((all|todas(\s+as)?)` + evidenceBridge + `)?((previous|prior|above|anteriores?|as)` + evidenceBridge + `)?(instructions?|instru[çc][ãõo](es)?|regras|rules|ordens?)` +
+		`|(disregard|forget|ignore)` + evidenceBridge + `((all|everything|tudo)` + evidenceBridge + `)?((previous|prior|your|as)` + evidenceBridge + `)?(instructions?|prompt|regras|instru[çc][õo](es)?)` +
+		`|(nova(s)?` + evidenceBridge + `instru[çc][ãõo](es)?|new` + evidenceBridge + `instructions?)` +
+		`|(you are now|from now on you are|act as|behave as|pretend to be|finja que|aja como|você agora [ée]|responda como)` +
+		`|(reveal|show|print|repeat|expose)` + evidenceBridge + `((your|the|o|seu)` + evidenceBridge + `)?(system` + evidenceBridge + `)?(prompt|instructions?|diretrizes|prompt do sistema|instru[çc][ãõo](es)? do sistema)` +
+		`|(revele|mostre|imprima|repita)` + evidenceBridge + `((seu|o|a)` + evidenceBridge + `)?(prompt( do sistema)?|instru[çc][õo]es( do sistema)?|diretrizes)` +
 		`|SEARCH_EVIDENCE_JSONL|END_SEARCH_EVIDENCE`)
 
 // sanitizeEvidenceText neutralizes prompt-injection vectors in third-party
@@ -1002,7 +1008,7 @@ func formatSearchResults(results []SearchResult) string {
 		item := map[string]string{
 			"source_id": fmt.Sprintf("S%d", i+1),
 			"title":     compactSearchText(result.Title, 180),
-			"url":       result.URL,
+			"url":       sanitizeEvidenceText(result.URL),
 			"snippet":   compactSearchText(result.Snippet, 700),
 		}
 		if result.Date != "" {
@@ -1252,12 +1258,12 @@ func (s *Server) makeProviderRequest(ctx context.Context, route RouteDecision, i
 		return s.makeOpenAIWebSearchRequest(ctx, route, instructions, input)
 	}
 
-	store := true
+	// Store stays nil: makeOpenAIRequest applies the OPENAI_STORE_PROMPTS
+	// opt-in (default false — provider-side retention is a privacy decision).
 	reqBody := ResponsesAPIRequest{
 		Model:        route.Model,
 		Input:        input,
 		Instructions: instructions,
-		Store:        &store,
 	}
 	return s.makeOpenAIRequest(ctx, reqBody, route)
 }
@@ -1283,12 +1289,13 @@ func (s *Server) makeFallbackWebSearchRequest(ctx context.Context, route RouteDe
 }
 
 func (s *Server) makeOpenAIWebSearchRequest(ctx context.Context, route RouteDecision, instructions, input string) (string, error) {
-	store := true
-	reqBody, fallbackRoute := buildOpenAIWebSearchRequest(route, instructions, input, &store)
+	// Store stays nil: the OPENAI_STORE_PROMPTS opt-in is applied downstream
+	// in makeOpenAIRequest.
+	reqBody, fallbackRoute := buildOpenAIWebSearchRequest(route, instructions, input)
 	return s.makeOpenAIRequest(ctx, reqBody, fallbackRoute)
 }
 
-func buildOpenAIWebSearchRequest(route RouteDecision, instructions, input string, store *bool) (ResponsesAPIRequest, RouteDecision) {
+func buildOpenAIWebSearchRequest(route RouteDecision, instructions, input string) (ResponsesAPIRequest, RouteDecision) {
 	fallbackRoute := route
 	if isClaudeModel(fallbackRoute.Model) {
 		log.Printf("Claude model %s cannot use OpenAI web_search; using fallback model %s", fallbackRoute.Model, openAIFallbackModel)
@@ -1301,7 +1308,6 @@ func buildOpenAIWebSearchRequest(route RouteDecision, instructions, input string
 		Model:        fallbackRoute.Model,
 		Input:        input,
 		Instructions: instructions,
-		Store:        store,
 		Tools:        []interface{}{webSearchTool},
 	}
 
@@ -2054,9 +2060,17 @@ func (s *Server) handleConfigAPI(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleGetConfigAPI returns the current runtime configuration as JSON
+// handleGetConfigAPI returns the runtime configuration as JSON, with the
+// system prompt redacted: the prompt is the primary injection defense, and
+// GET is reachable with the shared /chat API key, so its full text must not
+// be exfiltratable. The admin dashboard (Basic-auth) returns it in full.
 func (s *Server) handleGetConfigAPI(w http.ResponseWriter, r *http.Request) {
 	config := admin.GetConfig()
+	config.BaseSystemPrompt = ""
+	config.SystemPrompt = ""
+	for k := range config.CategoryPrompts {
+		config.CategoryPrompts[k] = "[redacted]"
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	setCORSHeaders(w)
