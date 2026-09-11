@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -213,12 +214,12 @@ func TestDefaultModelConfiguration(t *testing.T) {
 	admin.SetDefaultConfig(clotildeBaseSystemPromptTemplate)
 	config := admin.GetConfig()
 
-	if config.StandardModel != "gemma-4-31b" {
-		t.Errorf("Expected StandardModel to be 'gemma-4-31b', got '%s'", config.StandardModel)
+	if config.StandardModel != "qwen-3.8-27b" {
+		t.Errorf("Expected StandardModel to be 'qwen-3.8-27b', got '%s'", config.StandardModel)
 	}
 
-	if config.PremiumModel != "gemma-4-31b" {
-		t.Errorf("Expected PremiumModel to be 'gemma-4-31b', got '%s'", config.PremiumModel)
+	if config.PremiumModel != "qwen-3.8-27b" {
+		t.Errorf("Expected PremiumModel to be 'qwen-3.8-27b', got '%s'", config.PremiumModel)
 	}
 }
 
@@ -429,8 +430,8 @@ func TestHandleGetConfigAPI_RedactsSystemPrompt(t *testing.T) {
 
 	admin.SetConfig(admin.RuntimeConfig{
 		BaseSystemPrompt: "SECRET PROMPT TEXT %s",
-		StandardModel:    "gemma-4-31b",
-		PremiumModel:     "gemma-4-31b",
+		StandardModel:    "qwen-3.8-27b",
+		PremiumModel:     "qwen-3.8-27b",
 	})
 
 	server := &Server{}
@@ -445,7 +446,7 @@ func TestHandleGetConfigAPI_RedactsSystemPrompt(t *testing.T) {
 	if strings.Contains(body, "SECRET PROMPT TEXT") {
 		t.Fatal("GET /api/config leaked the system prompt")
 	}
-	if !strings.Contains(body, "gemma-4-31b") {
+	if !strings.Contains(body, "qwen-3.8-27b") {
 		t.Fatal("non-secret config fields must still be returned")
 	}
 }
@@ -460,6 +461,19 @@ func TestOpenAIRequestBody_StoreNilForOptIn(t *testing.T) {
 	}
 }
 
+
+// The audio_transcribed flag must carry a concrete garbling example so the
+// model hedges on phonetically garbled proper nouns ("Davi Alcolumbre" ->
+// "Vila Columbia").
+func TestAudioCaveatCitesGarblingExample(t *testing.T) {
+	if !strings.Contains(audioCaveatText, "Davi Alcolumbre") ||
+		!strings.Contains(audioCaveatText, "Vila Columbia") {
+		t.Fatal("caveat must cite the real garbling example")
+	}
+	if !strings.Contains(audioCaveatText, "confirmação") {
+		t.Fatal("caveat must instruct the model to confirm assumptions")
+	}
+}
 
 // TestConfigAPIAuthorizationMatrix pins the privilege boundary of /api/config:
 // GET = service API key (enforced by auth.Middleware upstream); POST = admin
@@ -1353,3 +1367,116 @@ func TestPromptHallucinationPrevention(t *testing.T) {
 // 2. Mocking or test API setup
 // 3. Actual test cases for each edge case category
 // These would be added in a separate integration test file or with proper test infrastructure
+
+// TestHermesPrimaryPathSuccess verifies an enabled Hermes config answers as
+// the primary provider through the dispatch gate.
+func TestHermesPrimaryPathSuccess(t *testing.T) {
+	admin.SetDefaultConfig(clotildeBaseSystemPromptTemplate)
+
+	hits := 0
+	hServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":"x","model":"clotilde","choices":[{"message":{"role":"assistant","content":" resposta hermes"}}]}`))
+	}))
+	defer hServer.Close()
+
+	server := &Server{
+		hermesAPIKey:  "test-hermes-key",
+		hermesChatURL: hServer.URL,
+	}
+
+	resp, err := server.makeProviderRequest(context.Background(), RouteDecision{Model: "gemma-4-31b"}, "sistema", "pergunta", false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(resp, "resposta hermes") {
+		t.Errorf("expected Hermes-mock response, got: %q", resp)
+	}
+	if hits != 1 {
+		t.Errorf("expected exactly 1 upstream call (Hermes only), got %d", hits)
+	}
+}
+
+// TestHermesFallsBackToClaudeOnFailure verifies that a Hermes failure (here:
+// HTTP 500) falls through to the normal provider chain and still answers.
+func TestHermesFallsBackToClaudeOnFailure(t *testing.T) {
+	admin.SetDefaultConfig(clotildeBaseSystemPromptTemplate)
+
+	hits := 0
+	hServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":"msg_x","type":"message","role":"assistant","content":[{"type":"text","text":"claude diz oi"}]}`))
+	}))
+	defer hServer.Close()
+
+	deadServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer deadServer.Close()
+
+	server := &Server{
+		hermesAPIKey:      "test-hermes-key",
+		hermesChatURL:     deadServer.URL,
+		claudeAPIKey:      "test-claude-key",
+		claudeMessagesURL: hServer.URL,
+	}
+
+	resp, err := server.makeProviderRequest(context.Background(), RouteDecision{Model: "gemma-4-31b"}, "sistema", "pergunta", false)
+	if err != nil {
+		t.Fatalf("expected fallback success, got error: %v", err)
+	}
+	if !strings.Contains(resp, "claude diz oi") {
+		t.Errorf("expected Claude fallback response, got: %q", resp)
+	}
+	if hits != 1 {
+		t.Errorf("expected exactly 1 fallback call, got %d", hits)
+	}
+}
+
+// TestHermesDisabledWhenNoKey ensures the primary path stays inert without
+// HERMES_API_KEY (existing deployments keep their behavior).
+func TestHermesDisabledWhenNoKey(t *testing.T) {
+	admin.SetDefaultConfig(clotildeBaseSystemPromptTemplate)
+	hits := 0
+	hServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":"msg_x","type":"message","role":"assistant","content":[{"type":"text","text":"claude fallback ok"}]}`))
+	}))
+	defer hServer.Close()
+
+	server := &Server{
+		claudeAPIKey:      "test-claude-key",
+		claudeMessagesURL: hServer.URL,
+	}
+	if _, err := server.makeProviderRequest(context.Background(), RouteDecision{Model: "gemma-4-31b"}, "sistema", "pergunta", false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if hits != 1 {
+		t.Errorf("expected exactly 1 upstream call (no Hermes), got %d", hits)
+	}
+}
+
+// TestHermesRequestParsesQuotedContent covers the OpenAI-compatible parsing of
+// the Hermes API server, including content delivered as a JSON string.
+func TestHermesRequestParsesQuotedContent(t *testing.T) {
+	hServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":"x","choices":[{"message":{"role":"assistant","content":"\u00e1gua salgada"}}]}`))
+	}))
+	defer hServer.Close()
+
+	server := &Server{
+		hermesAPIKey:  "test-hermes-key",
+		hermesChatURL: hServer.URL,
+	}
+	resp, err := server.makeHermesRequest(context.Background(), "sistema", "pergunta")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp != "água salgada" {
+		t.Errorf("expected %q, got %q", "água salgada", resp)
+	}
+}

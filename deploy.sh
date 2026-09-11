@@ -14,6 +14,9 @@
 #   ZAI_SECRET           - Name of Z.AI API key secret in Secret Manager (GLM fallback)
 #   ADMIN_USER           - Admin username for dashboard (enables admin dashboard)
 #   ADMIN_SECRET         - Name of admin password secret in Secret Manager (enables admin dashboard)
+#   HERMES_API_KEY       - Name of the Hermes API-server key secret; enables the Hermes
+#                          primary path (HERMES_ENABLED=true) with provider-chain fallback
+#   HERMES_ENABLED       - "true" to route chats through Hermes first (default: off)
 #   CAMOUFOX_HARNESS_* - Optional external browser harness configuration (disabled by default)
 #   LOG_BUFFER_SIZE      - Max log entries in memory (default: 1000)
 #   MIN_INSTANCES        - Minimum warm instances (default: 0 to scale to zero when idle)
@@ -78,6 +81,9 @@ ENV_VARS="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},LOG_BUFFER_SIZE=${LOG_BUFFER_SIZE},
 if [ -n "$ADMIN_USER" ]; then
     ENV_VARS="${ENV_VARS},ADMIN_USER=${ADMIN_USER}"
 fi
+if [ "${HERMES_ENABLED:-}" = "true" ] && [ -n "$HERMES_API_KEY" ]; then
+    ENV_VARS="${ENV_VARS},HERMES_ENABLED=true"
+fi
 if [ -n "$CAMOUFOX_HARNESS_ENABLED" ]; then
     ENV_VARS="${ENV_VARS},CAMOUFOX_HARNESS_ENABLED=${CAMOUFOX_HARNESS_ENABLED}"
 fi
@@ -117,6 +123,9 @@ fi
 if [ -n "$CEREBRAS_SECRET" ]; then
     SECRETS="${SECRETS},CEREBRAS_KEY_SECRET_NAME=${CEREBRAS_SECRET}:latest"
 fi
+if [ -n "$HERMES_API_KEY" ]; then
+    SECRETS="${SECRETS},HERMES_API_KEY=${HERMES_API_KEY}:latest"
+fi
 
 echo "Building and deploying Clotilde..."
 echo "Project ID: $PROJECT_ID"
@@ -143,13 +152,12 @@ echo "Log Buffer Size: $LOG_BUFFER_SIZE"
 echo "Min Instances: $MIN_INSTANCES"
 echo ""
 
-# Build Docker image
-echo "Building Docker image..."
-docker build -t $IMAGE_NAME .
-
-# Push to Artifact Registry
-echo "Pushing to Artifact Registry..."
-docker push $IMAGE_NAME
+# Build and push a single-platform linux/amd64 image. --provenance/--sbom off:
+# buildx defaults wrap the image in an OCI index with attestation manifests,
+# which Cloud Run rejects ("must support amd64/linux").
+echo "Building and pushing Docker image (linux/amd64)..."
+docker buildx build --platform linux/amd64 --provenance=false --sbom=false \
+    -t $IMAGE_NAME --push .
 
 # Deploy to Cloud Run
 echo "Deploying to Cloud Run..."

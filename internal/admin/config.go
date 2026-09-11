@@ -26,8 +26,8 @@ var (
 		BaseSystemPrompt: "", // Will be initialized with default from main.go
 		CategoryPrompts:  nil,
 		CategoryModels:   make(map[string]string),
-		StandardModel:    "gemma-4-31b", // Cerebras Gemma 4 31B - fastest (web-grounded via search harness)
-		PremiumModel:     "gemma-4-31b", // Same fast model for all queries to avoid timeouts
+		StandardModel:    "qwen-3.8-27b", // Cerebras Qwen 3.8 27B - fastest available (gemma-4-31b 404 on current key)
+		PremiumModel:     "qwen-3.8-27b", // Same fast model for all queries to avoid timeouts
 	}
 	defaultCategoryPrompts = make(map[string]string) // Store default category prompts
 	initialized            = false

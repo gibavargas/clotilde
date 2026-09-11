@@ -39,7 +39,6 @@ const (
 	openRouterClaudeHaikuModel = "openrouter/anthropic/claude-haiku-4.5"
 	openAIFallbackModel        = "gpt-4o-mini"
 	defaultZAIModel            = "zai/glm-4.7-flash"
-	defaultCerebrasModel       = "gemma-4-31b"
 	defaultCerebrasChatURL     = "https://api.cerebras.ai/v1/chat/completions"
 	defaultClaudeMessagesURL   = "https://api.anthropic.com/v1/messages"
 	defaultZAIChatURL          = "https://api.z.ai/api/paas/v4/chat/completions"
@@ -63,6 +62,7 @@ var (
 	openAIHTTPClient      = &http.Client{Transport: providerHTTPTransport, Timeout: openAIRequestTimeout}
 	zAIHTTPClient         = &http.Client{Transport: providerHTTPTransport, Timeout: openAIRequestTimeout}
 	cerebrasHTTPClient    = &http.Client{Transport: providerHTTPTransport, Timeout: cerebrasRequestTimeout}
+hermesHTTPClient      = &http.Client{Transport: providerHTTPTransport, Timeout: hermesRequestTimeout}
 	claudeHTTPClient      = &http.Client{Transport: providerHTTPTransport, Timeout: claudeRequestTimeout}
 
 	brazilLocationOnce sync.Once
@@ -97,12 +97,21 @@ func newProviderHTTPTransport() *http.Transport {
 
 type ChatRequest struct {
 	Message string `json:"message"`
+	// AudioTranscribed marks voice-dictated requests (Apple transcription
+	// garbles proper nouns; the prompt layer adds a hedging caveat).
+	AudioTranscribed bool `json:"audio_transcribed,omitempty"`
 }
 
 type ChatResponse struct {
 	Response string `json:"response"`
 	Error    string `json:"error,omitempty"`
 }
+
+// audioCaveatText is appended to the system prompt when the request was
+// voice-dictated. Apple transcription routinely garbles proper nouns
+// ("Davi Alcolumbre" -> "Vila Columbia"), so the model must treat the
+// transcription as a phonetic hint, not a spelling.
+const audioCaveatText = "\n\nCONTEXTO DE ENTRADA POR VOZ: A pergunta do usuário veio de transcrição automática de áudio (Apple), que frequentemente deturpa nomes próprios e lugares foneticamente parecidos (ex.: 'Davi Alcolumbre' pode virar 'Vila Columbia'). Regras: (1) NÃO trate o texto transcrito como grafia confiável de nomes próprios; (2) se a pergunta depender de um nome próprio, considere candidatos foneticamente próximos antes de concluir que algo não existe; (3) se houver dúvida razoável sobre qual entidade o usuário quis dizer, diga o que você assumiu e peça confirmação curta; (4) nunca invente fatos para encaixar a grafia transcrita."
 
 // RouteDecision is the internal format for createResponse (compatible with router.RouteDecision)
 type RouteDecision struct {
@@ -117,12 +126,14 @@ type Server struct {
 	claudeAPIKey     string // Anthropic Claude API key for fast responses
 	zAIAPIKey        string // Z.AI OpenAI-compatible API key for GLM models
 	cerebrasAPIKey   string // Cerebras API key for gemma/gpt-oss models
+	hermesAPIKey     string // Bearer key for the Hermes API server (primary when enabled)
 	apiKeySecret     string
 	logger           *logging.Logger
 
 	claudeMessagesURL string
 	zAIChatURL        string
 	cerebrasChatURL   string
+	hermesChatURL     string
 	browserHarness    BrowserHarnessConfig
 }
 
@@ -313,7 +324,12 @@ func main() {
 	claudeKey := loadOptionalSecret(ctx, secretClient, "CLAUDE_KEY_SECRET_NAME", "CLAUDE_SECRET_NAME", "Claude API")
 	zAIKey := loadOptionalSecret(ctx, secretClient, "ZAI_KEY_SECRET_NAME", "ZAI_SECRET_NAME", "Z.AI API")
 	cerebrasKey := loadOptionalSecret(ctx, secretClient, "CEREBRAS_KEY_SECRET_NAME", "CEREBRAS_SECRET_NAME", "Cerebras API")
-	if claudeKey == "" && openaiKey == "" && openRouterKey == "" && zAIKey == "" && cerebrasKey == "" {
+	hermesKey := os.Getenv("HERMES_API_KEY")
+	hermesChatURL := os.Getenv("HERMES_CHAT_URL")
+	if hermesKey != "" {
+		log.Printf("Hermes primary path enabled")
+	}
+	if claudeKey == "" && openaiKey == "" && openRouterKey == "" && zAIKey == "" && cerebrasKey == "" && hermesKey == "" {
 		log.Fatal("No AI provider configured. Set CLAUDE_KEY_SECRET_NAME, OPENROUTER_KEY_SECRET_NAME, OPENAI_KEY_SECRET_NAME, ZAI_KEY_SECRET_NAME, or CEREBRAS_KEY_SECRET_NAME with a direct key value, or set the matching *_SECRET_NAME for Secret Manager lookup.")
 	}
 	if claudeKey != "" {
@@ -341,9 +357,11 @@ func main() {
 		claudeAPIKey:     claudeKey,
 		zAIAPIKey:        zAIKey,
 		cerebrasAPIKey:   cerebrasKey,
+		hermesAPIKey:     hermesKey,
 		apiKeySecret:     apiKeySecret,
 		logger:           logger,
 		browserHarness:   browserHarnessConfigFromEnv(),
+		hermesChatURL:    hermesChatURL,
 	}
 	if server.browserHarness.Enabled {
 		log.Printf("Browser search harness enabled: mode=%s max_pages=%d", server.browserHarness.Mode, server.browserHarness.MaxPages)
@@ -648,6 +666,9 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	// Get dynamic system prompt from runtime config with category-specific override
 	config := admin.GetConfig()
 	systemPrompt := s.buildSystemPrompt(config, route.Category, currentTime)
+	if req.AudioTranscribed {
+		systemPrompt += audioCaveatText
+	}
 
 	// Convert router.RouteDecision to internal RouteDecision format
 	internalRoute := RouteDecision{
@@ -1230,41 +1251,98 @@ func (s *Server) makeCamoufoxGroundedRequest(ctx context.Context, route RouteDec
 }
 
 func (s *Server) makeProviderRequest(ctx context.Context, route RouteDecision, instructions, input string, webSearch bool) (string, error) {
-	if isOpenRouterModel(route.Model) {
-		log.Printf("Using OpenRouter API: model=%s, web_search=%v", route.Model, webSearch)
-		return s.makeOpenRouterRequest(ctx, route.Model, instructions, input, webSearch)
-	}
-	if isZAIModel(route.Model) {
-		log.Printf("Using Z.AI API: model=%s, web_search=%v", route.Model, webSearch)
-		return s.makeZAIRequest(ctx, route.Model, instructions, input, webSearch)
-	}
-	if isCerebrasModel(route.Model) && s.cerebrasAPIKey != "" {
-		log.Printf("Using Cerebras API: model=%s", route.Model)
-		return s.makeCerebrasRequest(ctx, route.Model, instructions, input)
-	}
-	if isClaudeModel(route.Model) && s.claudeAPIKey != "" {
-		if webSearch {
-			log.Printf("Using Claude native web_search tool for grounded response")
-			return s.makeClaudeWebSearchRequest(ctx, route.Model, instructions, input)
+	if s.hermesAPIKey != "" {
+		timeout, ok := hermesDeadline(ctx)
+		if ok {
+			log.Printf("Using Hermes primary path: url=%s, budget=%v", s.hermesEndpoint(), timeout)
+			response, err := s.makeHermesRequest(ctx, instructions, input)
+			if err == nil {
+				return response, nil
+			}
+			log.Printf("Hermes primary path failed, falling back to configured providers: %v", err)
+		} else {
+			log.Printf("Hermes primary path skipped: context budget below minimum")
 		}
-		log.Printf("Using Claude API for fast response: model=%s", route.Model)
-		return s.makeClaudeRequest(ctx, route.Model, instructions, input)
 	}
-	if s.openaiAPIKey == "" {
-		return "", fmt.Errorf("no AI provider key configured for model %s", route.Model)
+	return s.makeProviderChainRequest(ctx, route, instructions, input, webSearch)
+}
+
+// makeProviderChainRequest dispatches by routed model and degrades gracefully:
+// if the routed model's provider fails (missing key, timeout, upstream 4xx/5xx
+// or empty body), the call is retried down a fixed preference order
+// (Claude → OpenRouter → Z.AI → OpenAI) so an upstream outage degrades the
+// answer instead of failing the request. Sub-calls inherit the caller's
+// remaining deadline.
+func (s *Server) makeProviderChainRequest(ctx context.Context, route RouteDecision, instructions, input string, webSearch bool) (string, error) {
+	var resp string
+	var err error
+	switch {
+	case isOpenRouterModel(route.Model) && s.openRouterAPIKey != "":
+		log.Printf("Using OpenRouter API: model=%s, web_search=%v", route.Model, webSearch)
+		resp, err = s.makeOpenRouterRequest(ctx, route.Model, instructions, input, webSearch)
+	case isZAIModel(route.Model) && s.zAIAPIKey != "":
+		log.Printf("Using Z.AI API: model=%s, web_search=%v", route.Model, webSearch)
+		resp, err = s.makeZAIRequest(ctx, route.Model, instructions, input, webSearch)
+	case isCerebrasModel(route.Model) && s.cerebrasAPIKey != "":
+		log.Printf("Using Cerebras API: model=%s", route.Model)
+		resp, err = s.makeCerebrasRequest(ctx, route.Model, instructions, input)
+	case isClaudeModel(route.Model) && s.claudeAPIKey != "":
+		log.Printf("Using Claude API: model=%s, web_search=%v", route.Model, webSearch)
+		resp, err = s.claudeCall(ctx, route.Model, instructions, input, webSearch)
+	default:
+		err = fmt.Errorf("no provider configured for model %s", route.Model)
 	}
+	if err == nil {
+		return resp, nil
+	}
+	log.Printf("Provider for %s failed (%v); trying fallback chain", route.Model, err)
+
+	// Ordered fallbacks. Claude first: direct key, fast, native web search.
+	if !isClaudeModel(route.Model) && s.claudeAPIKey != "" {
+		if resp, err = s.claudeCall(ctx, defaultClaudeHaikuModel, instructions, input, webSearch); err == nil {
+			log.Printf("Fallback succeeded: claude/%s", defaultClaudeHaikuModel)
+			return resp, nil
+		}
+		log.Printf("Claude fallback failed: %v", err)
+	}
+	if !isOpenRouterModel(route.Model) && s.openRouterAPIKey != "" {
+		if resp, err = s.makeOpenRouterRequest(ctx, openRouterClaudeHaikuModel, instructions, input, webSearch); err == nil {
+			log.Printf("Fallback succeeded: openrouter/%s", openRouterClaudeHaikuModel)
+			return resp, nil
+		}
+		log.Printf("OpenRouter fallback failed: %v", err)
+	}
+	if !isZAIModel(route.Model) && s.zAIAPIKey != "" {
+		if resp, err = s.makeZAIRequest(ctx, defaultZAIModel, instructions, input, webSearch); err == nil {
+			log.Printf("Fallback succeeded: zai/%s", defaultZAIModel)
+			return resp, nil
+		}
+		log.Printf("Z.AI fallback failed: %v", err)
+	}
+	if !isOpenAIModel(route.Model) && s.openaiAPIKey != "" {
+		fallbackRoute := route
+		fallbackRoute.Model = openAIFallbackModel
+		if resp, err = s.openAICall(ctx, fallbackRoute, instructions, input, webSearch); err == nil {
+			log.Printf("Fallback succeeded: openai/%s", openAIFallbackModel)
+			return resp, nil
+		}
+		log.Printf("OpenAI fallback failed: %v", err)
+	}
+	return "", err
+}
+
+func (s *Server) claudeCall(ctx context.Context, model, instructions, input string, webSearch bool) (string, error) {
 	if webSearch {
-		log.Printf("Using OpenAI web_search tool for web search")
+		return s.makeClaudeWebSearchRequest(ctx, model, instructions, input)
+	}
+	return s.makeClaudeRequest(ctx, model, instructions, input)
+}
+
+func (s *Server) openAICall(ctx context.Context, route RouteDecision, instructions, input string, webSearch bool) (string, error) {
+	if webSearch {
 		return s.makeOpenAIWebSearchRequest(ctx, route, instructions, input)
 	}
-
-	// Store stays nil: makeOpenAIRequest applies the OPENAI_STORE_PROMPTS
-	// opt-in (default false — provider-side retention is a privacy decision).
-	reqBody := ResponsesAPIRequest{
-		Model:        route.Model,
-		Input:        input,
-		Instructions: instructions,
-	}
+	reqBody := ResponsesAPIRequest{Model: route.Model, Input: input, Instructions: instructions}
 	return s.makeOpenAIRequest(ctx, reqBody, route)
 }
 
@@ -1908,7 +1986,107 @@ func findClaudeWebSearchErrorCode(value interface{}) (string, bool) {
 	return "", false
 }
 
-// isClaudeModel checks if the model name is a Claude model
+// Hermes (A2A agent on the Ampere box) integration. Mounting HERMES_API_KEY
+// (deploy.sh gates this behind HERMES_ENABLED=true) turns Hermes into the
+// PRIMARY provider for every chat; any failure (timeout, 5xx, empty body)
+// falls through to the normal provider chain, so Shortcuts still get an
+// answer within budget.
+const (
+	defaultHermesChatURL   = "https://instance-20260511-2136.tailfdb2de.ts.net/v1/chat/completions"
+	defaultHermesModel     = "clotilde"
+	hermesRequestTimeout   = 20 * time.Second
+	hermesMinContextBudget = 8 * time.Second // skip Hermes if less than this remains
+)
+
+// hermesDeadline splits the remaining request budget into a per-call deadline:
+// full hermesRequestTimeout when there is room, otherwise what is left minus a
+// small reserve, and never less than hermesMinContextBudget (in which case the
+// call is skipped entirely).
+func hermesDeadline(ctx context.Context) (time.Duration, bool) {
+	remaining, ok := ctx.Deadline()
+	if !ok {
+		return hermesRequestTimeout, true
+	}
+	budget := time.Until(remaining)
+	if budget < hermesMinContextBudget {
+		return 0, false
+	}
+	if budget > hermesRequestTimeout {
+		return hermesRequestTimeout, true
+	}
+	return budget, true
+}
+
+// makeHermesRequest calls the Hermes API server (OpenAI-compatible) with the
+// model_routes alias that pins the Cerebras model inside the agent harness.
+func (s *Server) makeHermesRequest(ctx context.Context, systemPrompt, userMessage string) (string, error) {
+	if s.hermesAPIKey == "" {
+		return "", fmt.Errorf("Hermes API key not configured")
+	}
+	reqBody := OpenRouterChatRequest{
+		Model: defaultHermesModel,
+		Messages: []OpenRouterMessage{
+			{Role: "system", Content: systemPrompt},
+			{Role: "user", Content: userMessage},
+		},
+		MaxTokens: claudeResponseMaxTokens,
+	}
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal Hermes request: %w", err)
+	}
+
+	timeout, ok := hermesDeadline(ctx)
+	if !ok {
+		return "", fmt.Errorf("Hermes skipped: remaining context budget below %v", hermesMinContextBudget)
+	}
+	callCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	log.Printf("Hermes request: model=%s, timeout=%v", defaultHermesModel, timeout)
+	httpReq, err := http.NewRequestWithContext(callCtx, "POST", s.hermesEndpoint(), bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", fmt.Errorf("failed to create Hermes request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", s.hermesAPIKey))
+
+	resp, err := hermesHTTPClient.Do(httpReq)
+	if err != nil {
+		return "", fmt.Errorf("failed to make Hermes request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read Hermes response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("Hermes API returned status %d: %s", resp.StatusCode, string(body))
+		return "", fmt.Errorf("Hermes API returned status %d", resp.StatusCode)
+	}
+
+	var apiResp OpenRouterChatResponse
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return "", fmt.Errorf("failed to decode Hermes response: %w", err)
+	}
+	if len(apiResp.Choices) == 0 {
+		return "", fmt.Errorf("Hermes response contained no choices")
+	}
+	content := extractOpenRouterMessageContent(apiResp.Choices[0].Message.Content)
+	if content == "" {
+		return "", fmt.Errorf("Hermes returned an empty response")
+	}
+	return content, nil
+}
+
+func (s *Server) hermesEndpoint() string {
+	if s.hermesChatURL != "" {
+		return s.hermesChatURL
+	}
+	return defaultHermesChatURL
+}
+
 func isClaudeModel(model string) bool {
 	return strings.HasPrefix(model, "claude-")
 }
@@ -1941,7 +2119,7 @@ func (s *Server) zAIEndpoint() string {
 }
 
 func isCerebrasModel(model string) bool {
-	return model == "gemma-4-31b" || model == "gpt-oss-120b"
+	return model == "qwen-3.8-27b" || model == "gemma-4-31b" || model == "gpt-oss-120b"
 }
 
 // cerebrasEndpoint returns the Cerebras chat-completions URL (override-able in tests).

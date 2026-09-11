@@ -37,6 +37,7 @@ var validModels = map[string]bool{
 	"o4-mini": true,
 
 	// Cerebras models (OpenAI-compatible, grounded via the Go search harness)
+	"qwen-3.8-27b": true,
 	"gemma-4-31b":  true,
 	"gpt-oss-120b": true,
 
