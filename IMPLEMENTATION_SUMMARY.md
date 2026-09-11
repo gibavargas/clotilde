@@ -106,7 +106,7 @@ Changes:
 #### 4. Deployment
 ```bash
 # deploy.sh supports:
-export CLAUDE_SECRET=clotilde-claude-key
+export CLAUDE_SECRET=<your-claude-secret-name>
 ./deploy.sh
 
 # Result: Claude enabled on Cloud Run
@@ -115,7 +115,7 @@ export CLAUDE_SECRET=clotilde-claude-key
 
 ### Secret Management
 
-**Created**: clotilde-claude-key  
+**Created**: <your-claude-secret-name>  
 **Storage**: Google Cloud Secret Manager  
 **Access**: Cloud Run service account  
 **Permissions**: secretmanager.secretAccessor role  
@@ -191,9 +191,9 @@ $ gcloud run services logs read clotilde --region=us-central1 --limit=5
 ## Configuration Status
 
 **Cloud Run Environment Variables**:
-- ✅ CLAUDE_KEY_SECRET_NAME → clotilde-claude-key
-- ✅ OPENAI_KEY_SECRET_NAME → clotilde-oai-e2665d43
-- ✅ API_KEY_SECRET_NAME → clotilde-api-key
+- ✅ CLAUDE_KEY_SECRET_NAME → <your-claude-secret-name>
+- ✅ OPENAI_KEY_SECRET_NAME → <your-openai-secret-name>
+- ✅ API_KEY_SECRET_NAME → <your-api-secret-name>
 - ✅ GOOGLE_CLOUD_PROJECT → sorteador-versiculos
 - ✅ LOG_BUFFER_SIZE → 1000
 

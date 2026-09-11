@@ -414,7 +414,7 @@ After these fixes, verify:
 
 ### Why This Was Implemented
 
-The original codebase had hardcoded secret names (`openai-api-key`, `clotilde-api-key`) visible in the public GitHub repository. While this doesn't expose the actual secret values, it reveals:
+The original codebase had hardcoded secret names (`openai-api-key`, `<your-api-secret-name>`) visible in the public GitHub repository. While this doesn't expose the actual secret values, it reveals:
 - Which secrets to target if someone gains access to your GCP project
 - Predictable secret names that attackers could try to access
 - Security through obscurity is eliminated
@@ -553,7 +553,7 @@ After implementing this feature, verify:
 ⚠️ **This is a breaking change**:
 - Existing deployments will fail until secret names are configured
 - Must run migration script or manually create new secrets
-- Old secret names (`openai-api-key`, `clotilde-api-key`) should be deleted after migration
+- Old secret names (`openai-api-key`, `<your-api-secret-name>`) should be deleted after migration
 
 ✅ **This is a critical security improvement**:
 - Prevents information disclosure via public repositories
@@ -1570,7 +1570,7 @@ curl -I https://<service-url>/admin/
 ```bash
 # Get your secret names first
 CLAUDE_SECRET=$(gcloud secrets list --format="value(name)" | grep -iE "claude|anthropic" | head -1)
-API_SECRET=$(gcloud secrets list --format="value(name)" | grep -E "clotilde-api-key|api-key" | head -1)
+API_SECRET=$(gcloud secrets list --format="value(name)" | grep -E "<your-api-secret-name>|api-key" | head -1)
 ADMIN_SECRET=$(gcloud secrets list --format="value(name)" | grep -i admin | head -1)
 
 # Set environment variables
@@ -1765,7 +1765,7 @@ func (h *Handler) IsEnabled() bool {
    ```bash
    # Get secret names (without revealing actual secret names)
    OPENAI_SECRET=$(gcloud secrets list --format="value(name)" | grep -iE "openai|oai" | head -1)
-   API_SECRET=$(gcloud secrets list --format="value(name)" | grep -E "clotilde-api-key|api-key" | head -1)
+   API_SECRET=$(gcloud secrets list --format="value(name)" | grep -E "<your-api-secret-name>|api-key" | head -1)
    ADMIN_SECRET=$(gcloud secrets list --format="value(name)" | grep -i admin | head -1)
    
    # Set environment variables and redeploy with admin enabled
@@ -1981,8 +1981,8 @@ export OPENAI_SECRET="clotilde-oai-XXXXXXXX"  # Replace XXXX with your actual na
 **❌ DON'T**:
 ```markdown
 # Example: UNSAFE - actual secret names exposed
-export OPENAI_SECRET="clotilde-oai-e2665d43"
-export API_SECRET="clotilde-auth-e2665d43"
+export OPENAI_SECRET="<your-openai-secret-name>"
+export API_SECRET="<your-auth-secret-name>"
 ```
 
 #### 4. Git Configuration
@@ -2046,7 +2046,7 @@ echo "config.local.*" >> .gitignore
 3. **Never include actual secret names**:
    ```bash
    # ❌ WRONG - actual secret name exposed
-   export OPENAI_SECRET=clotilde-oai-e2665d43
+   export OPENAI_SECRET=<your-openai-secret-name>
    export API_SECRET=clotilde-auth-xyz789
    ./deploy.sh
    ```
@@ -2190,7 +2190,7 @@ export OPENAI_SECRET="<your-openai-secret-name>"
 OPENAI_SECRET=$(gcloud secrets list --format="value(name)" | grep -i openai | head -1)
 
 # ❌ UNSAFE - Actual secret name exposed
-export OPENAI_SECRET="clotilde-oai-e2665d43"
+export OPENAI_SECRET="<your-openai-secret-name>"
 ```
 
 ---

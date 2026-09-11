@@ -204,7 +204,7 @@ After deploying to Cloud Run:
 
 ```bash
 # Get your API key from Secret Manager
-API_KEY=$(gcloud secrets versions access latest --secret=clotilde-api-key)
+API_KEY=$(gcloud secrets versions access latest --secret=<your-api-secret-name>)
 
 # Run timing tests
 ./test_timing.sh https://clotilde-xxxxx.run.app "$API_KEY"
