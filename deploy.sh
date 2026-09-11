@@ -156,8 +156,16 @@ echo ""
 # buildx defaults wrap the image in an OCI index with attestation manifests,
 # which Cloud Run rejects ("must support amd64/linux").
 echo "Building and pushing Docker image (linux/amd64)..."
-docker buildx build --platform linux/amd64 --provenance=false --sbom=false \
-    -t $IMAGE_NAME --push .
+if docker buildx version >/dev/null 2>&1; then
+    # buildx: single-platform, no OCI attestation wrappers (Cloud Run rejects them)
+    docker buildx build --platform linux/amd64 --provenance=false --sbom=false \
+        -t $IMAGE_NAME --push .
+else
+    # Legacy builder (no buildx plugin): build natively, cross-compile to amd64,
+    # then push separately.
+    docker build -t $IMAGE_NAME .
+    docker push $IMAGE_NAME
+fi
 
 # Deploy to Cloud Run
 echo "Deploying to Cloud Run..."
