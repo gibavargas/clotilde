@@ -65,8 +65,14 @@ IMAGE_NAME="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/${SERVICE_NAME}:
 LOG_BUFFER_SIZE=${LOG_BUFFER_SIZE:-1000}
 MIN_INSTANCES=${MIN_INSTANCES:-0}
 
-# Generate random salt for IP hashing if not provided
-IP_HASH_SALT=${IP_HASH_SALT:-$(openssl rand -hex 32)}
+# IP_HASH_SALT is stored in Secret Manager (clotilde-ip-hash-salt), not as a
+# plaintext env var: anyone with run.services.describe could previously read it.
+# Ensure it exists (create once with a random value if missing).
+if ! gcloud secrets describe clotilde-ip-hash-salt --project=$PROJECT_ID >/dev/null 2>&1; then
+    echo "Creating Secret Manager secret clotilde-ip-hash-salt..."
+    openssl rand -hex 32 | gcloud secrets create clotilde-ip-hash-salt \
+        --project=$PROJECT_ID --data-file=- --replication-policy=automatic
+fi
 
 # Full-content logging (questions/answers visible in Cloud Logging + admin).
 # Default OFF: docs/SECURITY.md promises metadata-only logging by default.
@@ -77,7 +83,7 @@ LOG_REDACT_PII=${LOG_REDACT_PII:-true}
 
 # Build environment variables string
 # Note: PORT is automatically set by Cloud Run, don't include it
-ENV_VARS="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},LOG_BUFFER_SIZE=${LOG_BUFFER_SIZE},IP_HASH_SALT=${IP_HASH_SALT},LOG_FULL_CONTENT=${LOG_FULL_CONTENT},LOG_REDACT_PII=${LOG_REDACT_PII}"
+ENV_VARS="GOOGLE_CLOUD_PROJECT=${PROJECT_ID},LOG_BUFFER_SIZE=${LOG_BUFFER_SIZE},LOG_FULL_CONTENT=${LOG_FULL_CONTENT},LOG_REDACT_PII=${LOG_REDACT_PII}"
 if [ -n "$ADMIN_USER" ]; then
     ENV_VARS="${ENV_VARS},ADMIN_USER=${ADMIN_USER}"
 fi
@@ -105,6 +111,7 @@ fi
 
 # Build secrets string
 SECRETS="API_KEY_SECRET_NAME=${API_SECRET}:latest"
+SECRETS="${SECRETS},IP_HASH_SALT=clotilde-ip-hash-salt:latest"
 if [ -n "$OPENAI_SECRET" ]; then
     SECRETS="${SECRETS},OPENAI_KEY_SECRET_NAME=${OPENAI_SECRET}:latest"
 fi
