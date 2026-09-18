@@ -2,8 +2,9 @@
 //
 // Pipeline: SERP scraping (Bing first — it keeps serving organic results to
 // datacenter IPs; DDG HTML/lite and Mojeek as fallbacks) -> concurrent page
-// fetching/extraction -> ranked SearchResults, all under a shared wall-clock
-// deadline so the caller (25s CarPlay budget) is never exceeded.
+// fetching/extraction -> ranked SearchResults. No internal deadline is
+// applied: every call is bounded only by the caller's context, whose sole
+// source of cancellation is Apple Shortcuts' client-side timeout.
 package websearch
 
 import (
@@ -39,24 +40,20 @@ type Result struct {
 	Snippet string `json:"snippet"`
 }
 
-// Search performs a DDG HTML search and enriches the top results with page
-// text extracted concurrently. budget bounds the whole operation.
-func Search(ctx context.Context, query string, maxResults int, budget time.Duration) ([]Result, error) {
+// Search performs a SERP search and enriches the top results with page
+// text extracted concurrently. Bounded only by ctx — no budget of its own;
+// the request context (canceled when Apple Shortcuts drops the connection)
+// is the single deadline.
+func Search(ctx context.Context, query string, maxResults int) ([]Result, error) {
 	if strings.TrimSpace(query) == "" {
 		return nil, errors.New("websearch: empty query")
 	}
 	if maxResults <= 0 {
 		maxResults = 6
 	}
-	if budget <= 0 {
-		budget = 8 * time.Second
-	}
-	deadline := time.Now().Add(budget)
-	dctx, cancel := context.WithDeadline(ctx, deadline)
-	defer cancel()
 
 	started := time.Now()
-	hits, err := searchSERP(dctx, query, maxResults+4)
+	hits, err := searchSERP(ctx, query, maxResults+4)
 	if err != nil {
 		return nil, err
 	}
@@ -72,20 +69,10 @@ func Search(ctx context.Context, query string, maxResults int, budget time.Durat
 	var wg sync.WaitGroup
 	for i, hit := range hits {
 		results[i] = Result{Title: hit.title, URL: hit.url, Snippet: hit.snippet}
-		// Leave a slice of the budget for the LLM call downstream.
-		remaining := time.Until(deadline) - 1200*time.Millisecond
-		if remaining < 800*time.Millisecond {
-			remaining = 0 // snippet-only is fine if we are out of time
-		}
-		if remaining <= 0 {
-			continue
-		}
 		wg.Add(1)
 		go func(i int, url string, base string) {
 			defer wg.Done()
-			fctx, fcancel := context.WithTimeout(dctx, remaining)
-			defer fcancel()
-			if text := fetchPageText(fctx, url); text != "" {
+			if text := fetchPageText(ctx, url); text != "" {
 				results[i].Snippet = truncate(text, 1200)
 			}
 			_ = base
@@ -146,8 +133,9 @@ func searchSERP(ctx context.Context, query string, limit int) ([]ddgHit, error) 
 		// interstitial ("Please click here...") to headerless clients; the
 		// second request with the same jar returns organic results.
 		jar, _ := cookiejar.New(nil)
+		// No client Timeout: bounded by the request context (Apple Shortcuts
+		// client-side timeout via cancellation).
 		client := &http.Client{
-			Timeout:   6 * time.Second,
 			Transport: &http.Transport{Proxy: http.ProxyFromEnvironment, DisableCompression: true},
 			Jar:       jar,
 		}
@@ -358,7 +346,7 @@ func isInternalTarget(rawURL string) bool {
 }
 
 // fetchPageText downloads a page (HTML with graceful JSON fallback) and
-// extracts readable text, best-effort under its own timeout.
+// extracts readable text, best-effort; bounded only by the caller's context.
 func fetchPageText(ctx context.Context, pageURL string) string {
 	if isInternalTarget(pageURL) {
 		return ""
@@ -370,7 +358,7 @@ func fetchPageText(ctx context.Context, pageURL string) string {
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept-Language", "pt-BR,pt;q=0.9,en;q=0.8")
 
-	body, err := httpBody(ctx, req, 5*time.Second)
+	body, err := httpBody(ctx, req)
 	if err != nil {
 		return ""
 	}
@@ -382,9 +370,9 @@ func fetchPageText(ctx context.Context, pageURL string) string {
 	return extractHTMLText(body)
 }
 
-func httpBody(ctx context.Context, req *http.Request, timeout time.Duration) (string, error) {
+func httpBody(ctx context.Context, req *http.Request) (string, error) {
 	transport := &http.Transport{Proxy: http.ProxyFromEnvironment, DisableCompression: true}
-	client := &http.Client{Timeout: timeout, Transport: transport}
+	client := &http.Client{Transport: transport}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err

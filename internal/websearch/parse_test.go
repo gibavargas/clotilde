@@ -4,7 +4,6 @@ import (
 	"context"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestParseBingHits_DecodesRedirect(t *testing.T) {
@@ -96,7 +95,7 @@ func TestLooksLikeText(t *testing.T) {
 
 // Search-level error paths verified without network: empty query fails fast.
 func TestSearchEmptyQuery(t *testing.T) {
-	if _, err := Search(context.Background(), "", 6, time.Second); err == nil {
+	if _, err := Search(context.Background(), "", 6); err == nil {
 		t.Error("empty query must error")
 	}
 }

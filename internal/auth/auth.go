@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/subtle"
 	"net/http"
-	"strings"
 )
 
 // Context key for validated API key
@@ -29,8 +28,9 @@ func GetValidatedAPIKey(ctx context.Context) string {
 func Middleware(expectedAPIKey string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Skip auth for health check and admin routes (admin has its own Basic Auth)
-			if r.URL.Path == "/health" || r.URL.Path == "/admin" || strings.HasPrefix(r.URL.Path, "/admin/") {
+			// Skip auth for health (no data) and metrics (self-authenticated
+			// by its own bearer token).
+			if r.URL.Path == "/health" || r.URL.Path == "/metrics" {
 				next.ServeHTTP(w, r)
 				return
 			}

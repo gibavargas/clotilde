@@ -89,15 +89,15 @@ func TestMiddleware_HealthCheckBypass(t *testing.T) {
 	}
 }
 
-func TestMiddleware_AdminRouteBypass(t *testing.T) {
+func TestMiddleware_MetricsRouteBypass(t *testing.T) {
 	expectedKey := "test-api-key-123"
 	handler := Middleware(expectedKey)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	}))
 
-	req := httptest.NewRequest("GET", "/admin/dashboard", nil)
-	// No X-API-Key header - should still work (admin has its own auth)
+	// /metrics carries its own bearer auth and must pass the API-key layer
+	req := httptest.NewRequest("GET", "/metrics", nil)
 	rr := httptest.NewRecorder()
 
 	handler.ServeHTTP(rr, req)
