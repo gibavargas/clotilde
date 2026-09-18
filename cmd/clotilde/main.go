@@ -36,12 +36,10 @@ var startTime = time.Now()
 const (
 	timezoneBR = "America/Sao_Paulo"
 
-	// Apple Shortcuts gives up at ~30s. 25s server-side leaves client margin;
-	// everything below inherits this single deadline.
-	chatRequestTimeout = 25 * time.Second
-
-	// Hard cap on SERP enrichment so Hermes keeps the bulk of the window.
-	serpBudget = 9 * time.Second
+	// Deliberately NO server-side response deadline: Apple Shortcuts'
+	// ~30s client timeout (connection close → context cancellation) is the
+	// only clock (João's rule, 09/18). The handler runs until the client
+	// hangs up; Cloud Run's 30s request cap is the infra backstop.
 
 	// Hermes output ceiling: concise spoken answers, no runaway narration.
 	hermesMaxTokens = 1536
@@ -362,10 +360,9 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("[%s] Request received: IP=%s, MessageLength=%d", requestID, hashIP(clientip.FromRequest(r)), len(sanitizedMessage))
 
-	// Apple Shortcuts has ~30s. 25s leaves buffer for network + client-side
-	// processing; every downstream call inherits this deadline.
-	ctx, cancel := context.WithTimeout(r.Context(), chatRequestTimeout)
-	defer cancel()
+	// The request context (cancelled when Apple Shortcuts drops the
+	// connection) is the single deadline — no server-side cap by design.
+	ctx := r.Context()
 
 	systemPrompt := fmt.Sprintf(clotildeSystemPrompt, getCurrentBrazilTime())
 	if req.AudioTranscribed {
@@ -390,10 +387,8 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("[%s] Hermes error: %v", requestID, err)
 		s.logRequest(requestID, r, req.Message, sanitizedMessage, "", hermesModel, time.Since(start), "error", err.Error())
-		if ctx.Err() == context.DeadlineExceeded || strings.Contains(err.Error(), "context deadline exceeded") || strings.Contains(err.Error(), "timeout") {
-			respondSuccess(w, "Desculpe, a pergunta demorou demais para processar. Tente uma pergunta mais simples ou tente novamente.")
-			return
-		}
+		// The client's own timeout governs latency; a genuine Hermes
+		// failure (auth, 5xx, DNS) surfaces as a plain 502.
 		respondError(w, "Hermes unavailable", http.StatusBadGateway)
 		return
 	}
@@ -445,16 +440,13 @@ func needsFreshData(message string) bool {
 
 // fetchEvidence runs the SERP harness queries in parallel, dedupes by URL,
 // and returns the formatted evidence block ("" when nothing usable came
-// back). The whole pass is capped at serpBudget so Hermes keeps the bulk of
-// the request window.
+// back). Bounded only by ctx — the client's timeout is the single clock;
+// with no evidence the prompt ships bare and Hermes searches on its own.
 func fetchEvidence(ctx context.Context, question string) string {
 	queries := queryrewrite.Rewrite(question, time.Now().In(getBrazilLocation()))
 	if len(queries) == 0 {
 		return ""
 	}
-
-	sctx, cancel := context.WithTimeout(ctx, serpBudget)
-	defer cancel()
 
 	started := time.Now()
 	type outcome struct {
@@ -464,7 +456,7 @@ func fetchEvidence(ctx context.Context, question string) string {
 	ch := make(chan outcome, len(queries))
 	for _, q := range queries {
 		go func(q string) {
-			results, err := websearch.Search(sctx, q, 4)
+			results, err := websearch.Search(ctx, q, 4)
 			ch <- outcome{results, err}
 		}(q)
 	}
