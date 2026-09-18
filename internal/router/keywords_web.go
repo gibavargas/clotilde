@@ -92,6 +92,19 @@ func init() {
 		"saúde", "educação", "transporte", "habitação", "saneamento", "infraestrutura", "obras",
 
 		// Technology & Science
+		// Explicit search commands from the operator ("pesquise na
+		// internet X") — normalize to the same stem as "pesquisa" so
+		// any imperative form routes to web_search with search ON.
+		"pesquisa", "pesquise", "pesquisar", "procure", "procurar",
+		"busque", "buscar", "google",
+		"pesquisa na internet", "pesquise na internet", "procure na internet",
+		"busca na internet", "busque na internet", "procura na internet",
+		"pesquise na web", "pesquisa na web", "procure na web",
+		"busca na web", "busque na web", "procura na web",
+		"pesquise pra mim", "pesquisa pra mim", "procure pra mim",
+		"busca pra mim", "busque pra mim", "procura pra mim",
+		"pesquise para mim", "pesquisa para mim", "procure para mim",
+		"busca para mim", "busque para mim", "procura para mim",
 		"tecnologia", "inovação", "ciência", "descoberta", "pesquisa", "estudo", "artigo científico",
 		"nasa", "esa", "spacex", "foguete", "satélite", "missão espacial", "marte", "lua", "universo",
 		"galáxia", "estrela", "planeta", "asteroide", "cometa", "buraco negro", "big bang", "física",
