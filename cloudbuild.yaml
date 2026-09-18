@@ -40,11 +40,13 @@ steps:
         [ -n "${_CAMOUFOX_HARNESS_TIMEOUT_SECONDS}" ] && ENV_VARS="$${ENV_VARS},CAMOUFOX_HARNESS_TIMEOUT_SECONDS=${_CAMOUFOX_HARNESS_TIMEOUT_SECONDS}"
         
         SECRETS="API_KEY_SECRET_NAME=${_API_SECRET}:latest"
+        SECRETS="$${SECRETS},IP_HASH_SALT=clotilde-ip-hash-salt:latest"
         [ -n "${_OPENAI_SECRET}" ] && SECRETS="$${SECRETS},OPENAI_KEY_SECRET_NAME=${_OPENAI_SECRET}:latest"
         [ -n "${_ADMIN_SECRET}" ] && SECRETS="$${SECRETS},ADMIN_PASSWORD=${_ADMIN_SECRET}:latest"
         [ -n "${_CLAUDE_SECRET}" ] && SECRETS="$${SECRETS},CLAUDE_KEY_SECRET_NAME=${_CLAUDE_SECRET}:latest"
         [ -n "${_OPENROUTER_SECRET}" ] && SECRETS="$${SECRETS},OPENROUTER_KEY_SECRET_NAME=${_OPENROUTER_SECRET}:latest"
         [ -n "${_ZAI_SECRET}" ] && SECRETS="$${SECRETS},ZAI_KEY_SECRET_NAME=${_ZAI_SECRET}:latest"
+        [ -n "${_CEREBRAS_SECRET}" ] && SECRETS="$${SECRETS},CEREBRAS_KEY_SECRET_NAME=${_CEREBRAS_SECRET}:latest"
         
         gcloud run deploy ${_SERVICE_NAME} \
           --image ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/${_SERVICE_NAME}:latest \
@@ -77,6 +79,7 @@ substitutions:
   _CLAUDE_SECRET: ''                         # Recommended: Claude API key secret name
   _OPENROUTER_SECRET: ''                     # Optional: OpenRouter API key secret name
   _ZAI_SECRET: ''                            # Optional: Z.AI API key secret name
+  _CEREBRAS_SECRET: ''                       # Optional: Cerebras API key secret name (blank = undeclared substitution is allowed since it's only used with [ -n ])
   _LOG_BUFFER_SIZE: '1000'                   # Optional: max log entries in memory
   _IP_HASH_SALT: ''                          # Optional: stable IP hash salt
   _MIN_INSTANCES: '0'                        # Keep 0 to scale to zero when idle; 1 keeps a paid warm instance
