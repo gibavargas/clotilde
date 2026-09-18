@@ -1,8 +1,8 @@
 # Build stage
-# Build stage runs natively on the build host's arch; the pure-Go static build
-# cross-compiles to GOARCH=amd64 below (no QEMU emulation in the toolchain).
-# Builder runs natively (arm64 on this Mac); pure-Go cross-compiles to amd64 below.
-FROM --platform=linux/arm64 golang:1.26-alpine AS builder
+# Pure-Go static build cross-compiles to GOARCH=amd64; the builder image is
+# left without --platform so it resolves natively on any build host (arm64 Mac,
+# amd64 Cloud Build).
+FROM golang:1.26-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache git ca-certificates tzdata

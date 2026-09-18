@@ -92,6 +92,8 @@ CarPlay compatibility: VERIFIED
 ### For test_server_local.sh
 - `CLAUDE_KEY_SECRET_NAME` - Claude API key (required)
 - `OPENAI_KEY_SECRET_NAME` - OpenAI key (optional, can be dummy)
+- `CEREBRAS_KEY_SECRET_NAME` - Cerebras key (optional)
+- `HERMES_API_KEY` - Hermes agent-server key (optional; pair with `HERMES_ENABLED=true`)
 - `API_KEY_SECRET_NAME` - Auth key for API (default: test-api-key-123)
 - `PORT` - Server port (default: 8080)
 

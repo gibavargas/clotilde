@@ -9,7 +9,7 @@ Clotilde CarPlay Assistant implements multiple layers of security to protect use
 ### Assets to Protect
 
 1. **User Prompts**: Voice input from CarPlay users
-2. **API Keys**: upstream provider keys (Claude, OpenRouter, OpenAI, Z.AI) and service authentication key
+2. **API Keys**: upstream provider keys (Cerebras, Claude, OpenRouter, OpenAI, Z.AI, optional Hermes key) and service authentication key
 3. **Service Availability**: Protection against DDoS and abuse
 4. **User Privacy**: Full prompts and responses are logged for admin/audit visibility, so access control and retention policy matter
 
@@ -206,11 +206,11 @@ roles/secretmanager.secretAccessor
 **IMPORTANT - Full Content Logging**:
 By default, this service does **not** log complete user prompts or AI responses. Full content logging is enabled only when `LOG_FULL_CONTENT=true` is set.
 
-If full content logging is enabled, any Personal Identifiable Information (PII), sensitive data, health information, or private conversations that users share with the assistant may be recorded in the in-memory log buffer and Google Cloud Logging, subject to retention policies.
+If full content logging is enabled, any Personal Identifiable Information (PII), sensitive data, health information, or private conversations that users share with the assistant may be recorded in the in-memory log buffer and Google Cloud Logging, subject to retention policies. As defense in depth, `LOG_REDACT_PII=true` (the default) additionally redacts PII patterns from logged content; set it to `false` only for deliberate debugging.
 
 **What IS Logged by Default**:
 - Request timestamp
-- IP address hash (SHA-256 hash with salt, not actual IP address)
+- IP address hash (SHA-256 hash with salt, not actual IP address; the salt lives in Secret Manager as `clotilde-ip-hash-salt`, created automatically by `deploy.sh` — never a plaintext env var)
 - Message length
 - Response time
 - Model used
@@ -223,7 +223,7 @@ If full content logging is enabled, any Personal Identifiable Information (PII),
 - Sanitized user input
 - Full AI responses
 - Request timestamp
-- IP address hash (SHA-256 hash with salt, not actual IP address)
+- IP address hash (SHA-256 hash with salt, not actual IP address; the salt lives in Secret Manager as `clotilde-ip-hash-salt`, created automatically by `deploy.sh` — never a plaintext env var)
 - Message length
 - Response time
 - Model used
