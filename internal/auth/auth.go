@@ -28,9 +28,9 @@ func GetValidatedAPIKey(ctx context.Context) string {
 func Middleware(expectedAPIKey string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Skip auth for health (no data) and metrics (self-authenticated
-			// by its own bearer token).
-			if r.URL.Path == "/health" || r.URL.Path == "/metrics" {
+			// Skip auth for CORS preflight OPTIONS, health (no data), and
+			// metrics (self-authenticated by its own bearer token).
+			if r.Method == http.MethodOptions || r.URL.Path == "/health" || r.URL.Path == "/metrics" {
 				next.ServeHTTP(w, r)
 				return
 			}

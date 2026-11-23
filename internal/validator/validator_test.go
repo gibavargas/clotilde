@@ -300,3 +300,57 @@ func TestMiddleware_UnicodeMessage(t *testing.T) {
 		t.Errorf("Expected status 200, got %d", rr.Code)
 	}
 }
+
+func TestMiddleware_ExactMaxBodySizeAllowed(t *testing.T) {
+	handler := Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	prefix := `{"message":"ok","pad":"`
+	suffix := `"}`
+	padLen := maxRequestBodySize - len(prefix) - len(suffix)
+	exactBody := []byte(prefix + strings.Repeat("x", padLen) + suffix)
+	if len(exactBody) != maxRequestBodySize {
+		t.Fatalf("body len = %d, want %d", len(exactBody), maxRequestBodySize)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/chat", bytes.NewReader(exactBody))
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected exact %d-byte body to succeed, got %d", maxRequestBodySize, rr.Code)
+	}
+}
+
+func TestMiddleware_UnicodeRuneCountLimit(t *testing.T) {
+	handler := Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// 1000 accented characters = 2000 UTF-8 bytes, still <= 1000 characters.
+	msg := strings.Repeat("á", 1000)
+	bodyBytes, _ := json.Marshal(map[string]string{"message": msg})
+	req := httptest.NewRequest(http.MethodPost, "/chat", bytes.NewReader(bodyBytes))
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 1000 accented runes to pass, got %d", rr.Code)
+	}
+}
+
+func TestMiddleware_NonPostChatMethodsBypass(t *testing.T) {
+	handler := Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}))
+
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		req := httptest.NewRequest(method, "/chat", nil)
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusMethodNotAllowed {
+			t.Errorf("%s /chat expected to reach next handler (405), got %d", method, rr.Code)
+		}
+	}
+}

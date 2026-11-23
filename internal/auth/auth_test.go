@@ -107,6 +107,21 @@ func TestMiddleware_MetricsRouteBypass(t *testing.T) {
 	}
 }
 
+func TestMiddleware_OptionsBypass(t *testing.T) {
+	expectedKey := "test-api-key-123"
+	handler := Middleware(expectedKey)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	req := httptest.NewRequest(http.MethodOptions, "/chat", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Errorf("Expected status 204 for OPTIONS preflight, got %d", rr.Code)
+	}
+}
+
 func TestMiddleware_ConstantTimeComparison(t *testing.T) {
 	// This test verifies that constant-time comparison is used
 	// We can't directly test timing, but we can verify it works correctly

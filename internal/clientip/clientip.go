@@ -29,8 +29,10 @@ func runningOnCloudRun() bool {
 // trivially spoofable.
 func FromRequest(r *http.Request) string {
 	if runningOnCloudRun() {
-		if ip := rightmostForwardedFor(r.Header.Get("X-Forwarded-For")); ip != "" {
-			return ip
+		if xff := r.Header.Values("X-Forwarded-For"); len(xff) > 0 {
+			if ip := rightmostForwardedFor(strings.Join(xff, ",")); ip != "" {
+				return ip
+			}
 		}
 	}
 	return cleanIP(r.RemoteAddr)

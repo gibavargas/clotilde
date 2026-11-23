@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"unicode/utf8"
 )
 
 const (
@@ -20,15 +21,16 @@ type requestBody struct {
 func Middleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Only /chat has the {"message": "..."} contract. Other routes, such
-			// as /api/config, have their own validation and size limits.
-			if r.URL.Path != "/chat" || r.Method == http.MethodOptions {
+			// Only POST /chat has the {"message": "..."} contract. Other routes
+			// and non-POST methods (OPTIONS, HEAD, GET) pass through to auth
+			// and route handlers.
+			if r.URL.Path != "/chat" || r.Method != http.MethodPost {
 				next.ServeHTTP(w, r)
 				return
 			}
 
-			// Limit request body size
-			limitedReader := io.LimitReader(r.Body, maxRequestBodySize)
+			// Limit request body size (read +1 byte so bodies of exactly maxRequestBodySize are allowed)
+			limitedReader := io.LimitReader(r.Body, maxRequestBodySize+1)
 			body, err := io.ReadAll(limitedReader)
 			if err != nil {
 				http.Error(w, `{"error":"Failed to read request body"}`, http.StatusBadRequest)
@@ -37,7 +39,7 @@ func Middleware() func(http.Handler) http.Handler {
 			r.Body.Close()
 
 			// Check if body is too large
-			if len(body) >= maxRequestBodySize {
+			if len(body) > maxRequestBodySize {
 				http.Error(w, `{"error":"Request body too large"}`, http.StatusRequestEntityTooLarge)
 				return
 			}
@@ -49,8 +51,8 @@ func Middleware() func(http.Handler) http.Handler {
 				return
 			}
 
-			// Validate message field
-			if len(reqBody.Message) > maxMessageLength {
+			// Validate message field (count characters/runes, not UTF-8 bytes)
+			if utf8.RuneCountInString(reqBody.Message) > maxMessageLength {
 				http.Error(w, `{"error":"Message too long"}`, http.StatusBadRequest)
 				return
 			}

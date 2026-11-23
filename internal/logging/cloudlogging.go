@@ -21,8 +21,9 @@ type CloudLogger struct {
 var (
 	cloudLogger     *CloudLogger
 	cloudLoggerOnce sync.Once
+	flushMu         sync.Mutex
 	flushTicker     *time.Ticker
-	flushStop       chan bool
+	flushStop       chan struct{}
 )
 
 // GetCloudLogger returns the singleton Cloud Logger instance
@@ -58,31 +59,39 @@ func GetCloudLogger() *CloudLogger {
 
 // startPeriodicFlush starts a goroutine that flushes logs every 10 seconds
 func startPeriodicFlush() {
-	flushTicker = time.NewTicker(10 * time.Second)
-	flushStop = make(chan bool)
+	flushMu.Lock()
+	ticker := time.NewTicker(10 * time.Second)
+	stopCh := make(chan struct{})
+	flushTicker = ticker
+	flushStop = stopCh
+	flushMu.Unlock()
 
 	go func() {
+		defer ticker.Stop()
 		for {
 			select {
-			case <-flushTicker.C:
-				cloudLogger := GetCloudLogger()
-				if cloudLogger.IsEnabled() {
-					if err := cloudLogger.Flush(); err != nil {
+			case <-ticker.C:
+				cl := GetCloudLogger()
+				if cl.IsEnabled() {
+					if err := cl.Flush(); err != nil {
 						log.Printf("Error flushing Cloud Logging: %v", err)
 					}
 				}
-			case <-flushStop:
-				flushTicker.Stop()
+			case <-stopCh:
 				return
 			}
 		}
 	}()
 }
 
-// StopPeriodicFlush stops the periodic flush goroutine
+// StopPeriodicFlush stops the periodic flush goroutine safely and idempotently
 func StopPeriodicFlush() {
+	flushMu.Lock()
+	defer flushMu.Unlock()
 	if flushStop != nil {
 		close(flushStop)
+		flushStop = nil
+		flushTicker = nil
 	}
 }
 
@@ -139,11 +148,12 @@ func (cl *CloudLogger) Close() error {
 	cl.mu.Lock()
 	defer cl.mu.Unlock()
 
+	cl.enabled = false
 	if cl.client != nil {
-		if err := cl.client.Close(); err != nil {
-			return err
-		}
-		cl.enabled = false
+		err := cl.client.Close()
+		cl.client = nil
+		cl.logger = nil
+		return err
 	}
 	return nil
 }
@@ -153,7 +163,7 @@ func (cl *CloudLogger) Flush() error {
 	cl.mu.RLock()
 	defer cl.mu.RUnlock()
 
-	if cl.client != nil {
+	if cl.enabled && cl.logger != nil {
 		return cl.logger.Flush()
 	}
 	return nil

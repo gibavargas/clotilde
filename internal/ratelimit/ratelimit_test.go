@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/clotilde/carplay-assistant/internal/auth"
 )
@@ -373,5 +374,56 @@ func TestGetClientIP_XForwardedFor_EmptyString(t *testing.T) {
 	// Should fallback to RemoteAddr
 	if !strings.HasPrefix(ip, "192.168.1.1") {
 		t.Errorf("Expected fallback to RemoteAddr, got %s", ip)
+	}
+}
+
+func TestRateLimiter_EvictsOnNewKeysBeyondCap(t *testing.T) {
+	rl := &rateLimiter{requests: make(map[string][]time.Time)}
+	for i := 0; i < maxTrackedKeys+50; i++ {
+		if !rl.isAllowed(fmt.Sprintf("ip-%d", i)) {
+			t.Fatalf("first request for key %d unexpectedly denied", i)
+		}
+	}
+	if len(rl.requests) > maxTrackedKeys {
+		t.Fatalf("limiter map grew beyond cap: %d > %d", len(rl.requests), maxTrackedKeys)
+	}
+}
+
+func TestPreAuthMiddleware_BlocksBruteForceNotAuthenticatedTraffic(t *testing.T) {
+	authHandler := auth.Middleware("good-key")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	handler := PreAuthMiddleware()(authHandler)
+
+	// Valid authenticated traffic from one IP can exceed 5/min (up to auth quota)
+	for i := 0; i < 8; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/chat", nil)
+		req.RemoteAddr = "198.51.100.50:12345"
+		req.Header.Set("X-API-Key", "good-key")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("authenticated request %d got %d, want 200", i+1, rr.Code)
+		}
+	}
+
+	// Failed auth attempts from another IP get blocked with 429 after 5 failures
+	for i := 0; i < 5; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/chat", nil)
+		req.RemoteAddr = "198.51.100.99:12345"
+		req.Header.Set("X-API-Key", "wrong-key")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("failed auth %d got %d, want 401", i+1, rr.Code)
+		}
+	}
+	req := httptest.NewRequest(http.MethodPost, "/chat", nil)
+	req.RemoteAddr = "198.51.100.99:12345"
+	req.Header.Set("X-API-Key", "wrong-key")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("6th attempt after brute force got %d, want 429", rr.Code)
 	}
 }

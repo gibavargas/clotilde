@@ -57,14 +57,22 @@ func TestExtractJSONStrings(t *testing.T) {
 func TestIsInternalTarget(t *testing.T) {
 	internal := []string{
 		"http://localhost/x",
+		"http://LOCALHOST/x",
+		"http://localhost./x",
+		"http://sub.localhost/x",
 		"http://127.0.0.1/x",
 		"http://10.0.0.1/x",
 		"http://192.168.1.1/x",
 		"http://172.16.0.1/x",
+		"http://100.64.0.1/x",
 		"http://169.254.169.254/metadata", // cloud metadata
 		"http://[::1]/x",
+		"http://[::ffff:127.0.0.1]/x",
+		"http://[::ffff:169.254.169.254]/latest/meta-data/",
 		"http://service.internal/x",
+		"http://METADATA.GOOGLE.INTERNAL./computeMetadata/v1/",
 		"http://printer.local/x",
+		"file:///etc/passwd",
 		"not a url",
 	}
 	for _, u := range internal {

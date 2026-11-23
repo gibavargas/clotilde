@@ -100,3 +100,15 @@ func TestCloudRunDetectionFollowsEnv(t *testing.T) {
 		t.Fatal("K_SERVICE set: must detect Cloud Run")
 	}
 }
+
+func TestFromRequestMultipleXFFHeaderLines(t *testing.T) {
+	withCloudRunEnv(t)
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Add("X-Forwarded-For", "198.51.100.1")
+	req.Header.Add("X-Forwarded-For", "203.0.113.42")
+	req.RemoteAddr = "10.0.0.1:1234"
+
+	if got := FromRequest(req); got != "203.0.113.42" {
+		t.Fatalf("expected rightmost IP across multiple XFF headers, got %q", got)
+	}
+}

@@ -85,40 +85,96 @@ func (rl *rateLimiter) isAllowedWithLimits(key string, perMinute, perHour int) b
 
 	times, exists := rl.requests[key]
 	if !exists {
+		if len(rl.requests) >= maxTrackedKeys {
+			evictOldestKey(rl.requests)
+		}
 		rl.requests[key] = []time.Time{now}
 		return true
 	}
 
-	// Count requests in last minute
+	// Prune entries older than one hour and count requests in last minute/hour.
+	validTimes := times[:0]
 	minuteCount := 0
 	hourCount := 0
 	for _, t := range times {
-		if t.After(oneMinuteAgo) {
-			minuteCount++
-		}
 		if t.After(oneHourAgo) {
+			validTimes = append(validTimes, t)
 			hourCount++
+			if t.After(oneMinuteAgo) {
+				minuteCount++
+			}
 		}
 	}
 
 	// Check limits
-	if minuteCount >= perMinute {
-		return false
-	}
-	if hourCount >= perHour {
+	if minuteCount >= perMinute || hourCount >= perHour {
+		rl.requests[key] = validTimes
 		return false
 	}
 
 	// Add current request
-	rl.requests[key] = append(times, now)
-	if len(rl.requests) > maxTrackedKeys {
-		// Bound the key space: many distinct source IPs (or keys) must not
-		// grow the map without limit. Evict the least-recently-seen entry.
-		evictOldest(rl.requests, func(times []time.Time) time.Time {
-			return times[len(times)-1]
-		})
-	}
+	rl.requests[key] = append(validTimes, now)
 	return true
+}
+
+func (rl *rateLimiter) isExhausted(key string, perMinute, perHour int) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	times, exists := rl.requests[key]
+	if !exists {
+		return false
+	}
+
+	now := time.Now()
+	oneMinuteAgo := now.Add(-1 * time.Minute)
+	oneHourAgo := now.Add(-1 * time.Hour)
+
+	minuteCount := 0
+	hourCount := 0
+	for _, t := range times {
+		if t.After(oneHourAgo) {
+			hourCount++
+			if t.After(oneMinuteAgo) {
+				minuteCount++
+			}
+		}
+	}
+	return minuteCount >= perMinute || hourCount >= perHour
+}
+
+func (rl *rateLimiter) record(key string) {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+	oneHourAgo := now.Add(-1 * time.Hour)
+
+	times, exists := rl.requests[key]
+	if !exists {
+		if len(rl.requests) >= maxTrackedKeys {
+			evictOldestKey(rl.requests)
+		}
+		rl.requests[key] = []time.Time{now}
+		return
+	}
+
+	validTimes := times[:0]
+	for _, t := range times {
+		if t.After(oneHourAgo) {
+			validTimes = append(validTimes, t)
+		}
+	}
+	rl.requests[key] = append(validTimes, now)
+}
+
+func evictOldestKey(m map[string][]time.Time) {
+	evictOldest(m, func(times []time.Time) time.Time {
+		if len(times) == 0 {
+			return time.Unix(0, 0)
+		}
+		return times[len(times)-1]
+	})
 }
 
 // maxTrackedKeys bounds the number of distinct limiter keys (blunts a
@@ -131,13 +187,14 @@ const maxTrackedKeys = 10000
 func evictOldest[K comparable, V any](m map[K]V, stamp func(V) time.Time) {
 	var oldestKey K
 	var oldest time.Time
+	hasOldest := false
 	for k, v := range m {
 		t := stamp(v)
-		if oldest.IsZero() || t.Before(oldest) {
-			oldestKey, oldest = k, t
+		if !hasOldest || t.Before(oldest) {
+			oldestKey, oldest, hasOldest = k, t, true
 		}
 	}
-	if !oldest.IsZero() {
+	if hasOldest {
 		delete(m, oldestKey)
 	}
 }
@@ -148,8 +205,8 @@ func evictOldest[K comparable, V any](m map[K]V, stamp func(V) time.Time) {
 func Middleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Skip rate limiting for health check and admin routes
-			if r.URL.Path == "/health" || r.URL.Path == "/admin" || strings.HasPrefix(r.URL.Path, "/admin/") {
+			// Skip rate limiting for CORS preflight, health check, and admin routes
+			if r.Method == http.MethodOptions || r.URL.Path == "/health" || r.URL.Path == "/admin" || strings.HasPrefix(r.URL.Path, "/admin/") {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -183,14 +240,29 @@ func getClientIP(r *http.Request) string {
 	return clientip.FromRequest(r)
 }
 
-// PreAuthMiddleware implements IP-based rate limiting BEFORE authentication
-// This protects against brute force attacks on the authentication endpoint
-// It runs before auth.Middleware and uses stricter limits
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (sr *statusRecorder) WriteHeader(code int) {
+	sr.status = code
+	sr.ResponseWriter.WriteHeader(code)
+}
+
+func (sr *statusRecorder) Unwrap() http.ResponseWriter {
+	return sr.ResponseWriter
+}
+
+// PreAuthMiddleware implements IP-based brute-force protection BEFORE authentication.
+// It blocks IPs that have exhausted their failed-auth budget before auth runs,
+// while only counting authentication failures against the stricter pre-auth
+// limits so legitimate authenticated traffic can use the full per-key quota.
 func PreAuthMiddleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Skip pre-auth rate limiting for health check and admin routes
-			if r.URL.Path == "/health" || r.URL.Path == "/admin" || strings.HasPrefix(r.URL.Path, "/admin/") {
+			// Skip pre-auth rate limiting for CORS preflight, health check, and admin routes
+			if r.Method == http.MethodOptions || r.URL.Path == "/health" || r.URL.Path == "/admin" || strings.HasPrefix(r.URL.Path, "/admin/") {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -198,13 +270,20 @@ func PreAuthMiddleware() func(http.Handler) http.Handler {
 			// Use IP address as key (no API key validation yet)
 			ip := clientip.FromRequest(r)
 
-			// Use stricter limits for pre-auth requests
-			if !preAuthLimiter.isAllowedWithLimits(ip, preAuthRequestsPerMinute, preAuthRequestsPerHour) {
+			// Reject IPs that already hit the pre-auth brute-force cap before auth runs
+			if preAuthLimiter.isExhausted(ip, preAuthRequestsPerMinute, preAuthRequestsPerHour) {
 				http.Error(w, `{"error":"Too many requests"}`, http.StatusTooManyRequests)
 				return
 			}
 
-			next.ServeHTTP(w, r)
+			rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+			next.ServeHTTP(rec, r)
+
+			// Record failed auth attempts (401 on protected endpoints, or 404 on
+			// /metrics when bearer token is missing/invalid)
+			if rec.status == http.StatusUnauthorized || (r.URL.Path == "/metrics" && rec.status == http.StatusNotFound) {
+				preAuthLimiter.record(ip)
+			}
 		})
 	}
 }
