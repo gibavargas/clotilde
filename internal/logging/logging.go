@@ -115,16 +115,18 @@ func (l *Logger) Add(entry LogEntry) {
 	// Track model usage - categorize models as standard (fast/cheap) or premium (powerful/expensive)
 	// Standard models: gpt-4o-mini, Claude Haiku variants, gpt-3.5-turbo, etc.
 	// Premium models: gpt-4o, gpt-5, Claude Sonnet, Claude Opus, o1, o3, etc.
-	modelLower := strings.ToLower(entry.Model)
-	isStandard := strings.Contains(modelLower, "mini") ||
-		strings.Contains(modelLower, "haiku") ||
-		strings.Contains(modelLower, "nano") ||
-		strings.Contains(modelLower, "3.5-turbo")
+	if entry.Model != "" {
+		modelLower := strings.ToLower(entry.Model)
+		isStandard := strings.Contains(modelLower, "mini") ||
+			strings.Contains(modelLower, "haiku") ||
+			strings.Contains(modelLower, "nano") ||
+			strings.Contains(modelLower, "3.5-turbo")
 
-	if isStandard {
-		l.standardCount++
-	} else {
-		l.premiumCount++
+		if isStandard {
+			l.standardCount++
+		} else {
+			l.premiumCount++
+		}
 	}
 
 	// Also send to Cloud Logging for persistence
@@ -143,6 +145,9 @@ func (l *Logger) GetEntries(limit, offset int) []LogEntry {
 
 	if l.count == 0 {
 		return []LogEntry{}
+	}
+	if offset < 0 {
+		offset = 0
 	}
 
 	// Calculate available entries
@@ -175,6 +180,9 @@ func (l *Logger) GetEntriesFiltered(limit, offset int, model, status string, sta
 
 	if l.count == 0 {
 		return []LogEntry{}
+	}
+	if offset < 0 {
+		offset = 0
 	}
 
 	var filtered []LogEntry

@@ -50,14 +50,16 @@ var (
 		"presidente":  "presidente",
 		"clima":       "clima tempo",
 		"combustível": "preço combustível",
+		"combustivel": "preço combustível",
 		"pedágio":     "preço pedágio",
+		"pedagio":     "preço pedágio",
 	}
 
 	wordRe = regexp.MustCompile(`[\p{L}\p{N}]+`)
 
 	// temporalHints add the current year so results stay fresh; matches are
 	// checked against the lowercased question.
-	temporalHints = []string{"hoje", "ontem", "amanhã", "recente", "atual", "agora"}
+	temporalHints = []string{"hoje", "ontem", "amanhã", "amanha", "recente", "atual", "agora"}
 )
 
 // Rewrite converts a spoken question into one or two search queries. The
@@ -96,7 +98,6 @@ func Rewrite(question string, now time.Time) []string {
 
 	// Apply at most one domain hint, skipping hints whose first token is
 	// already present (avoids "senador senado federal senador" duplication).
-	expanded := false
 	for i, w := range salient {
 		hint, ok := domainHints[w]
 		if !ok || hint == w {
@@ -114,11 +115,9 @@ func Rewrite(question string, now time.Time) []string {
 		}
 		if !already {
 			salient[i] = hint
+			break
 		}
-		expanded = true
-		break
 	}
-	_ = expanded
 
 	// Temporal anchoring: a temporal word gains the current year so engines
 	// stop serving stale pages.
@@ -149,7 +148,7 @@ func Rewrite(question string, now time.Time) []string {
 // temporalYearSuffix reports whether w is a temporal hint word (the year
 // injection trigger). Extended in one place so callers stay simple.
 func temporalYearSuffix(w string, now time.Time) (string, bool) {
-	for _, t := range []string{"hoje", "ontem", "amanhã", "recente", "atual"} {
+	for _, t := range temporalHints {
 		if w == t {
 			return now.Format("2006"), true
 		}

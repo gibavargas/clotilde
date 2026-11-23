@@ -300,3 +300,71 @@ func TestHandleChatVoiceCaveatAppended(t *testing.T) {
 		t.Error("voice caveat not appended to system prompt")
 	}
 }
+
+func TestHandleChatOptionsPreflightAndHeadAuth(t *testing.T) {
+	t.Setenv("CORS_ALLOWED_ORIGIN", "https://tool.example")
+	handler := buildTestHandler(t)
+
+	// Browser CORS preflight carries no X-API-Key and must return 204 with CORS headers.
+	optReq := httptest.NewRequest(http.MethodOptions, "/chat", nil)
+	optRec := httptest.NewRecorder()
+	handler.ServeHTTP(optRec, optReq)
+	if optRec.Code != http.StatusNoContent {
+		t.Fatalf("OPTIONS /chat status = %d, want 204", optRec.Code)
+	}
+	if got := optRec.Header().Get("Access-Control-Allow-Origin"); got != "https://tool.example" {
+		t.Errorf("CORS header = %q, want https://tool.example", got)
+	}
+
+	// HEAD /chat without API key must return 401 (not 400 Invalid JSON from validator).
+	headReq := httptest.NewRequest(http.MethodHead, "/chat", nil)
+	headRec := httptest.NewRecorder()
+	handler.ServeHTTP(headRec, headReq)
+	if headRec.Code != http.StatusUnauthorized {
+		t.Errorf("HEAD /chat without key status = %d, want 401", headRec.Code)
+	}
+}
+
+func TestHandleChatWhitespaceAndURLOnlyFallback(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"choices":[{"message":{"content":"https://example.com/only-a-url"}}]}`))
+	}))
+	defer ts.Close()
+
+	logger := logging.NewLogger(8)
+	s := &Server{apiKeySecret: "k", hermesAPIKey: "h", hermesChatURL: ts.URL, logger: logger}
+
+	// Whitespace-only message must return 400.
+	wsReq := httptest.NewRequest(http.MethodPost, "/chat", strings.NewReader(`{"message":"   \n\t "}`))
+	wsRec := httptest.NewRecorder()
+	s.handleChat(wsRec, wsReq)
+	if wsRec.Code != http.StatusBadRequest {
+		t.Fatalf("whitespace message status = %d, want 400", wsRec.Code)
+	}
+
+	// Invalid JSON must log request latency (< 1s), not process uptime.
+	badReq := httptest.NewRequest(http.MethodPost, "/chat", strings.NewReader(`{bad`))
+	badRec := httptest.NewRecorder()
+	s.handleChat(badRec, badReq)
+	if badRec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid json status = %d, want 400", badRec.Code)
+	}
+	if entries := logger.GetEntries(1, 0); len(entries) != 1 || entries[0].ResponseTime > 1000 {
+		t.Errorf("invalid json logged abnormal ResponseTime: %+v", entries)
+	}
+
+	// URL-only model response must trigger spoken fallback instead of empty string.
+	req := httptest.NewRequest(http.MethodPost, "/chat", strings.NewReader(`{"message":"oi"}`))
+	rec := httptest.NewRecorder()
+	s.handleChat(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var resp ChatResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Response == "" || strings.Contains(resp.Response, "http") {
+		t.Errorf("expected spoken fallback without URL, got %q", resp.Response)
+	}
+}

@@ -76,8 +76,28 @@ func TestDecodeToUTF8_CharsetBranches(t *testing.T) {
 		t.Errorf("utf-16 decode failed: %q", got16)
 	}
 
+	// BOM-less UTF-16BE with non-ASCII byte (0x00 0xE9 = 'é') so utf8.Valid is false.
+	utf16beNoBOM := []byte{0x00, 0xE9, 0x00, 'A'}
+	if got16BE := decodeToUTF8(utf16beNoBOM, "text/html; charset=utf-16be"); got16BE != "éA" {
+		t.Errorf("utf-16be no-BOM decode failed: %q", got16BE)
+	}
+
 	if decodeToUTF8([]byte("plain utf8 text"), "") != "plain utf8 text" {
 		t.Error("valid utf-8 must pass through unchanged")
+	}
+}
+
+func TestParseBingHits_DecodesAbsoluteHTTPSRedirect(t *testing.T) {
+	encoded := "aHR0cHM6Ly93d3cxMi5zZW5hZG8ubGVnLmJyL25vdGljaWFz"
+	body := `<h2><a href="https://www.bing.com/search?q=internal">Bing internal</a></h2>` +
+		`<h2><a href="https://www.bing.com/ck/a?!&amp;u=a1` + encoded + `&ntb=1"><strong>Senado</strong> notícias</a></h2>`
+
+	hits := parseSERPLinks(body, 1)
+	if len(hits) != 1 {
+		t.Fatalf("expected 1 hit, got %d", len(hits))
+	}
+	if hits[0].url != "https://www12.senado.leg.br/noticias" {
+		t.Errorf("expected decoded https bing redirect, got %q", hits[0].url)
 	}
 }
 
@@ -87,6 +107,9 @@ func TestLooksLikeText(t *testing.T) {
 	}
 	if looksLikeText(strings.Repeat("\x00", 100)) {
 		t.Error("NUL-heavy body must be rejected")
+	}
+	if looksLikeText("\x01\x02\x03\x04\x05") {
+		t.Error("short control-only binary body must be rejected")
 	}
 	if !looksLikeText("Texto normal de página em português com acentuação.") {
 		t.Error("normal text must pass")

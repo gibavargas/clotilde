@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"compress/flate"
 	"compress/gzip"
+	"compress/zlib"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -22,6 +23,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/cookiejar"
+	"net/netip"
 	"net/url"
 	"regexp"
 	"strings"
@@ -32,6 +34,76 @@ import (
 	"golang.org/x/text/encoding/charmap"
 	"golang.org/x/text/encoding/unicode"
 )
+
+const maxBodyBytes = 600 * 1024
+
+var (
+	// Shared transport for SERP queries so idle connections are pooled instead
+	// of leaked per request.
+	serpTransport = &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DisableCompression:    true,
+		MaxIdleConns:          32,
+		MaxIdleConnsPerHost:   8,
+		IdleConnTimeout:       60 * time.Second,
+		TLSHandshakeTimeout:   5 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+
+	// Shared transport for third-party page fetches. Its DialContext resolves
+	// hostnames and refuses any loopback/private/link-local IP to block DNS
+	// rebinding and *.nip.io SSRF.
+	pageTransport = &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DisableCompression:    true,
+		DialContext:           safeDialContext,
+		MaxIdleConns:          64,
+		MaxIdleConnsPerHost:   8,
+		IdleConnTimeout:       60 * time.Second,
+		TLSHandshakeTimeout:   5 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+
+	pageHTTPClient = &http.Client{
+		Transport: pageTransport,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return errors.New("websearch: too many redirects")
+			}
+			if isInternalTarget(req.URL.String()) {
+				return errors.New("websearch: redirect to internal target blocked")
+			}
+			return nil
+		},
+	}
+)
+
+func safeDialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	var lastErr error
+	for _, ipAddr := range ips {
+		if isInternalIP(ipAddr.IP) {
+			return nil, fmt.Errorf("websearch: blocked connection to internal IP %s", ipAddr.IP)
+		}
+		conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(ipAddr.IP.String(), port))
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, errors.New("websearch: no reachable IP")
+}
 
 // Result is one piece of web evidence returned by the harness.
 type Result struct {
@@ -61,30 +133,28 @@ func Search(ctx context.Context, query string, maxResults int) ([]Result, error)
 		return nil, errors.New("websearch: no results")
 	}
 
-	type enriched struct {
-		idx int
-		res Result
-	}
 	results := make([]Result, len(hits))
 	var wg sync.WaitGroup
 	for i, hit := range hits {
 		results[i] = Result{Title: hit.title, URL: hit.url, Snippet: hit.snippet}
 		wg.Add(1)
-		go func(i int, url string, base string) {
+		go func(i int, targetURL string) {
 			defer wg.Done()
-			if text := fetchPageText(ctx, url); text != "" {
+			if text := fetchPageText(ctx, targetURL); text != "" {
 				results[i].Snippet = truncate(text, 1200)
 			}
-			_ = base
-		}(i, hit.url, hit.base)
+		}(i, hit.url)
 	}
 	wg.Wait()
 
-	// Drop entries that ended up with no usable text at all.
-	out := make([]Result, 0, len(results))
+	// Drop entries that ended up with no usable text at all, capped at maxResults.
+	out := make([]Result, 0, min(len(results), maxResults))
 	for _, r := range results {
 		if r.Snippet != "" || r.Title != "" {
 			out = append(out, r)
+			if len(out) >= maxResults {
+				break
+			}
 		}
 	}
 	if len(out) == 0 {
@@ -98,7 +168,6 @@ type ddgHit struct {
 	title   string
 	url     string
 	snippet string
-	base    string
 }
 
 var (
@@ -136,7 +205,7 @@ func searchSERP(ctx context.Context, query string, limit int) ([]ddgHit, error) 
 		// No client Timeout: bounded by the request context (Apple Shortcuts
 		// client-side timeout via cancellation).
 		client := &http.Client{
-			Transport: &http.Transport{Proxy: http.ProxyFromEnvironment, DisableCompression: true},
+			Transport: serpTransport,
 			Jar:       jar,
 		}
 		for attempt := 0; attempt < 2; attempt++ {
@@ -185,10 +254,11 @@ func fetchBody(ctx context.Context, client *http.Client, req *http.Request) (str
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("status %d", resp.StatusCode)
 	}
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 600*1024))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes))
 	if err != nil {
 		return "", err
 	}
+	raw = decompressIfNeeded(raw, resp.Header.Get("Content-Encoding"))
 	return decodeToUTF8(raw, resp.Header.Get("Content-Type")), nil
 }
 
@@ -203,6 +273,7 @@ func parseSERPLinks(body string, limit int) []ddgHit {
 	}
 
 	if matches := linkRe.FindAllStringSubmatch(body, limit); len(matches) > 0 {
+		snips := snippets(body)
 		var hits []ddgHit
 		for i, m := range matches {
 			final := normalizeDDGURL(html.UnescapeString(m[1]))
@@ -210,8 +281,8 @@ func parseSERPLinks(body string, limit int) []ddgHit {
 				continue
 			}
 			snippet := ""
-			if i < len(snippets(body)) {
-				snippet = snippets(body)[i]
+			if i < len(snips) {
+				snippet = snips[i]
 			}
 			hits = append(hits, ddgHit{title: stripTags(m[2]), url: final, snippet: snippet})
 		}
@@ -257,7 +328,7 @@ func snippets(body string) []string {
 // parseBingHits extracts organic results from a Bing SERP, decoding the
 // base64url target URLs embedded in bing.com/ck/a redirect links.
 func parseBingHits(body string, limit int) []ddgHit {
-	matches := bingH2Re.FindAllStringSubmatch(body, limit)
+	matches := bingH2Re.FindAllStringSubmatch(body, -1)
 	if len(matches) == 0 {
 		return nil
 	}
@@ -265,13 +336,13 @@ func parseBingHits(body string, limit int) []ddgHit {
 	seen := map[string]bool{}
 	for _, m := range matches {
 		href := html.UnescapeString(m[1])
-		final := normalizeDDGURL(href)
-		if final == "" {
-			if burl := bingURlRe.FindStringSubmatch(href); burl != nil {
-				final = decodeBingB64(burl[1])
-			}
+		var final string
+		if burl := bingURlRe.FindStringSubmatch(href); burl != nil && strings.Contains(strings.ToLower(href), "bing.com") {
+			final = decodeBingB64(burl[1])
+		} else {
+			final = normalizeDDGURL(href)
 		}
-		if final == "" || seen[final] || strings.Contains(final, "bing.com") {
+		if final == "" || seen[final] || strings.Contains(strings.ToLower(final), "bing.com") {
 			continue
 		}
 		title := stripTags(m[2])
@@ -280,6 +351,9 @@ func parseBingHits(body string, limit int) []ddgHit {
 		}
 		seen[final] = true
 		hits = append(hits, ddgHit{title: title, url: final})
+		if len(hits) >= limit {
+			break
+		}
 	}
 	return hits
 }
@@ -321,6 +395,27 @@ func normalizeDDGURL(href string) string {
 	return ""
 }
 
+func isInternalIP(ip net.IP) bool {
+	if ip == nil {
+		return true
+	}
+	if addr, ok := netip.AddrFromSlice(ip); ok {
+		addr = addr.Unmap()
+		if addr.IsLoopback() || addr.IsPrivate() || addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast() || addr.IsUnspecified() || addr.IsMulticast() {
+			return true
+		}
+		// Carrier-grade NAT (100.64.0.0/10), commonly used by Tailscale/cloud meshes.
+		if addr.Is4() {
+			b := addr.As4()
+			if b[0] == 100 && b[1] >= 64 && b[1] <= 127 {
+				return true
+			}
+		}
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified()
+}
+
 // isInternalTarget reports whether the URL points at loopback, private,
 // or link-local infrastructure. Search-result URLs are attacker-influenceable,
 // so the page fetcher must never probe internal endpoints.
@@ -329,15 +424,19 @@ func isInternalTarget(rawURL string) bool {
 	if err != nil {
 		return true
 	}
-	host := u.Hostname()
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return true
+	}
+	host := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
 	if host == "localhost" || host == "" {
 		return true
 	}
 	if ip := net.ParseIP(host); ip != nil {
-		return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified()
+		return isInternalIP(ip)
 	}
 	// Hostname endings that only resolve inside private networks.
-	for _, suffix := range []string{".local", ".internal", ".lan", ".home", ".corp"} {
+	for _, suffix := range []string{".localhost", ".local", ".internal", ".lan", ".home", ".corp"} {
 		if strings.HasSuffix(host, suffix) {
 			return true
 		}
@@ -370,10 +469,35 @@ func fetchPageText(ctx context.Context, pageURL string) string {
 	return extractHTMLText(body)
 }
 
+func decompressIfNeeded(raw []byte, contentEncoding string) []byte {
+	enc := strings.ToLower(strings.TrimSpace(contentEncoding))
+	// Some servers ignore DisableCompression or force-compress responses.
+	if len(raw) > 2 && (enc == "gzip" || (raw[0] == 0x1f && raw[1] == 0x8b)) {
+		if c, err := gzip.NewReader(bytes.NewReader(raw)); err == nil {
+			defer c.Close()
+			if inflated, ierr := io.ReadAll(io.LimitReader(c, maxBodyBytes)); ierr == nil {
+				return inflated
+			}
+		}
+	}
+	if len(raw) > 2 && enc == "deflate" {
+		if zr, err := zlib.NewReader(bytes.NewReader(raw)); err == nil {
+			defer zr.Close()
+			if inflated, zerr := io.ReadAll(io.LimitReader(zr, maxBodyBytes)); zerr == nil {
+				return inflated
+			}
+		}
+		fr := flate.NewReader(bytes.NewReader(raw))
+		defer fr.Close()
+		if inflated, ferr := io.ReadAll(io.LimitReader(fr, maxBodyBytes)); ferr == nil {
+			return inflated
+		}
+	}
+	return raw
+}
+
 func httpBody(ctx context.Context, req *http.Request) (string, error) {
-	transport := &http.Transport{Proxy: http.ProxyFromEnvironment, DisableCompression: true}
-	client := &http.Client{Transport: transport}
-	resp, err := client.Do(req)
+	resp, err := pageHTTPClient.Do(req.WithContext(ctx))
 	if err != nil {
 		return "", err
 	}
@@ -381,24 +505,11 @@ func httpBody(ctx context.Context, req *http.Request) (string, error) {
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("status %d", resp.StatusCode)
 	}
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 600*1024))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes))
 	if err != nil {
 		return "", err
 	}
-
-	// Some servers ignore DisableCompression or force-compress responses.
-	if len(raw) > 2 {
-		if c, cerr := gzip.NewReader(bytes.NewReader(raw)); cerr == nil {
-			if inflated, ierr := io.ReadAll(io.LimitReader(c, 600*1024)); ierr == nil {
-				raw = inflated
-			}
-			c.Close()
-		} else if len(raw) > 4 {
-			if inflated, ferr := io.ReadAll(flate.NewReader(bytes.NewReader(raw[2:]))); ferr == nil && len(inflated) > len(raw) {
-				raw = inflated
-			}
-		}
-	}
+	raw = decompressIfNeeded(raw, resp.Header.Get("Content-Encoding"))
 
 	body := decodeToUTF8(raw, resp.Header.Get("Content-Type"))
 	if !looksLikeText(body) {
@@ -428,7 +539,11 @@ func decodeToUTF8(raw []byte, contentType string) string {
 		if out, err := charmap.ISO8859_1.NewDecoder().Bytes(raw); err == nil {
 			return string(out)
 		}
-	case "utf-16", "utf-16le", "utf-16be":
+	case "utf-16be":
+		if out, err := unicode.UTF16(unicode.BigEndian, unicode.UseBOM).NewDecoder().Bytes(raw); err == nil {
+			return string(out)
+		}
+	case "utf-16", "utf-16le":
 		if out, err := unicode.UTF16(unicode.LittleEndian, unicode.UseBOM).NewDecoder().Bytes(raw); err == nil {
 			return string(out)
 		}
@@ -446,17 +561,24 @@ func looksLikeText(s string) bool {
 	if s == "" {
 		return false
 	}
-	if strings.Contains(s[:min(len(s), 512)], "\x00") {
-		return false
-	}
-	probe := s[:min(len(s), 1024)]
 	control := 0
-	for _, r := range probe {
-		if r < 0x20 && r != '\n' && r != '\r' && r != '	' {
+	total := 0
+	for _, r := range s {
+		if total >= 1024 {
+			break
+		}
+		if r == '\x00' {
+			return false
+		}
+		if r < 0x20 && r != '\n' && r != '\r' && r != '\t' {
 			control++
 		}
+		total++
 	}
-	return control*100 < 512 // ~50% threshold over 1024 runes
+	if total == 0 {
+		return false
+	}
+	return control*10 < total // reject if >= 10% control characters
 }
 
 func min(a, b int) int {

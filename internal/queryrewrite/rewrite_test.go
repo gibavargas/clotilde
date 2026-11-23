@@ -51,7 +51,7 @@ func TestRewriteSecondaryTruncated(t *testing.T) {
 
 func TestRewriteTemporalVariants(t *testing.T) {
 	cases := []struct{ word string }{
-		{"hoje"}, {"ontem"}, {"recente"}, {"atual"},
+		{"hoje"}, {"ontem"}, {"amanhã"}, {"amanha"}, {"recente"}, {"atual"}, {"agora"},
 	}
 	for _, tc := range cases {
 		got := Rewrite("a votação do senado "+tc.word, now)
@@ -68,6 +68,15 @@ func TestRewriteDollarHint(t *testing.T) {
 	}
 	if !strings.Contains(got[0], "2026") {
 		t.Errorf("recency year missing: %q", got[0])
+	}
+}
+
+func TestRewriteContinuesPastAlreadyPresentDomainHint(t *testing.T) {
+	// "cotação" is already present so "dólar" is skipped; scanning must continue
+	// and expand "combustivel" -> "preço combustível".
+	got := Rewrite("cotação dólar combustivel", now)
+	if !strings.Contains(got[0], "preço combustível") {
+		t.Errorf("second domain hint should still expand: %q", got[0])
 	}
 }
 

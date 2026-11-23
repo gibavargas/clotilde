@@ -18,58 +18,58 @@ var injectionPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)(repeat|echo|copy).*?(your|the).*?(instruction|prompt|directive|system prompt)`),
 
 	// Role/jailbreak attempts
-	regexp.MustCompile(`(?i)(you are|act as|pretend|roleplay|simulate).*?(developer|admin|root|system|assistant|ai|gpt)`),
+	regexp.MustCompile(`(?i)\b(you are|act as|pretend|roleplay|simulate)\b.*?\b(developer|admin\w*|root|system|assistant|ai|gpt)\b`),
 	regexp.MustCompile(`(?i)(new instruction|new prompt|new directive|new rule)`),
 
 	// Encoding/obfuscation attempts
 	regexp.MustCompile(`(?i)(base64|hex|decode|encode).*?(instruction|prompt|system)`),
 
 	// Instruction injection markers
-	regexp.MustCompile(`(?i)(<\|.*?\|>|\[INST\]|\[/INST\]|### Instruction|### System)`),
+	regexp.MustCompile(`(?is)(<\|.*?\|>|\[INST\]|\[/INST\]|### Instruction|### System)`),
 
 	// Attempts to break out of context
 	regexp.MustCompile(`(?i)(ignore.*?above|disregard.*?above|forget.*?above)`),
 
 	// Portuguese (the product's user language)
-	regexp.MustCompile(`(?i)(desconsidere?|desobede[çc]a|ignore|esque[çc]a|apague).*?(todas?\s+(as\s+)?|o\s+|as\s+)?(instru[çc][õo]es|instru[çc][ãõo]|prompt|diretrizes?|regras?|sistema)`),
-	regexp.MustCompile(`(?i)(revele|mostre|imprima|repita|diga|copie).*?(seu\s+|o\s+|a\s+)?(prompt(\s+do\s+sistema)?|instru[çc][õo]es(\s+do\s+sistema)?|diretrizes?)`),
-	regexp.MustCompile(`(?i)(finja|aja|virou|agora [ée] você|você agora|vire).*?(que\s+)?(um|uma|o|a)?\s*(desenvolvedor|admin|root|sistema|assistente|ia|gpt)`),
-	regexp.MustCompile(`(?i)(nova|novo)\s+(instru[çc][ãõo]|instru[çc][õo]es|prompt|diretriz|regra)`),
-	regexp.MustCompile(`(?i)(que|quais).{0,20}(suas?|as).{0,10}(instru[çc][õo]es|diretrizes|regras)`),
+	regexp.MustCompile(`(?i)(desconsidere?|desobede[çc]a|ignore|esque[çc]a|apague).*?(todas?\s+(as\s+)?|o\s+|as\s+)?(instru[çc](?:[ãa]o|[õo]es)|prompt|diretrizes?|regras?|sistema)`),
+	regexp.MustCompile(`(?i)(revele|mostre|imprima|repita|diga|copie).*?(seu\s+|o\s+|a\s+)?(prompt(\s+do\s+sistema)?|instru[çc](?:[ãa]o|[õo]es)(\s+do\s+sistema)?|diretrizes?)`),
+	regexp.MustCompile(`(?i)\b(finja|aja|virou|agora [ée] você|você agora|vire)\b.*?(que\s+)?(um|uma|o|a)?\s*\b(desenvolvedor|admin\w*|root|sistema|assistente|ia|gpt)\b`),
+	regexp.MustCompile(`(?i)(nova|novo)\s+(instru[çc](?:[ãa]o|[õo]es)|prompt|diretriz|regra)`),
+	regexp.MustCompile(`(?i)(que|quais).{0,20}(suas?|as).{0,10}(instru[çc](?:[ãa]o|[õo]es)|diretrizes|regras)`),
 }
 
 // SuspiciousKeywords are individual words that might indicate injection attempts
 var suspiciousKeywords = []string{
 	"jailbreak", "override", "bypass", "extract", "reveal", "system prompt",
 	"base prompt", "initial prompt", "ignore all", "forget all",
-	"prompt do sistema", "prompt do sistema", "desconsidere tudo",
+	"prompt do sistema", "desconsidere tudo",
 	"ignore tudo", "esqueça tudo", "instruções do sistema",
 }
 
 // Pre-compiled regex patterns for sanitization
 var (
 	reWhitespace = regexp.MustCompile(`\s+`)
-	reTag        = regexp.MustCompile(`(?i)<\|.*?\|>`)
-	reInst       = regexp.MustCompile(`(?i)\[INST\].*?\[/INST\]`)
+	reTag        = regexp.MustCompile(`(?is)<\|.*?\|>`)
+	reInst       = regexp.MustCompile(`(?is)\[INST\].*?\[/INST\]|\[/?INST\]`)
 	reHeader     = regexp.MustCompile(`(?i)###\s*(Instruction|System|User)`)
 
 	neutralizePatternsList = []struct {
 		pattern     *regexp.Regexp
 		replacement string
 	}{
-		{regexp.MustCompile(`(?i)ignore\s+(all\s+)?(previous|prior|above|earlier)\s+(instruction|prompt|directive|rule|guideline|system)`), ""},
+		{regexp.MustCompile(`(?i)ignore\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions?|prompt|directives?|rules?|guidelines?|system)`), ""},
 		{regexp.MustCompile(`(?i)disregard\s+(everything|all|all\s+above)`), ""},
-		{regexp.MustCompile(`(?i)(show|display|output|print|reveal|tell|give)\s+(me\s+)?(your|the)\s+(system|base|initial|original)\s+(prompt|instruction|directive|rule)`), ""},
-		{regexp.MustCompile(`(?i)(what|what\s+are)\s+(your|the)\s+(instruction|prompt|directive|rule|guideline|system\s+prompt)`), ""},
-		{regexp.MustCompile(`(?i)(repeat|echo|copy)\s+(your|the)\s+(instruction|prompt|directive|system\s+prompt)`), ""},
-		{regexp.MustCompile(`(?i)(you\s+are|act\s+as|pretend|roleplay|simulate).*?(developer|admin|root|system|assistant|ai|gpt)`), ""},
+		{regexp.MustCompile(`(?i)(show|display|output|print|reveal|tell|give)\s+(me\s+)?(your|the)\s+(system|base|initial|original)\s+(prompt|instructions?|directives?|rules?)`), ""},
+		{regexp.MustCompile(`(?i)(what|what\s+are)\s+(your|the)\s+(instructions?|prompt|directives?|rules?|guidelines?|system\s+prompt)`), ""},
+		{regexp.MustCompile(`(?i)(repeat|echo|copy)\s+(your|the)\s+(instructions?|prompt|directives?|system\s+prompt)`), ""},
+		{regexp.MustCompile(`(?i)\b(you\s+are|act\s+as|pretend|roleplay|simulate)\b.*?\b(developer|admin\w*|root|system|assistant|ai|gpt)\b`), ""},
 		{regexp.MustCompile(`(?i)(new\s+instruction|new\s+prompt|new\s+directive|new\s+rule)`), ""},
 		{regexp.MustCompile(`(?i)(base64|hex|decode|encode).*?(instruction|prompt|system)`), ""},
 		{regexp.MustCompile(`(?i)jailbreak`), ""},
-		{regexp.MustCompile(`(?i)(desconsidere?|desobede[çc]a|ignore|esque[çc]a)\s+(tudo(\s+que)?\s+)?((dito\s+)?(antes|acima)\s+)?(as\s+)?(instru[çc][õo]es|instru[çc][ãõo]|diretrizes?|regras?)`), ""},
-		{regexp.MustCompile(`(?i)(revele|mostre|imprima|repita|diga|copie)\s+(seu\s+|o\s+|a\s+)?(prompt(\s+do\s+sistema)?|instru[çc][õo]es(\s+do\s+sistema)?|diretrizes?)`), ""},
-		{regexp.MustCompile(`(?i)(finja|aja)\s+que\s+.*?(desenvolvedor|admin|root|sistema|assistente|ia|gpt)`), ""},
-		{regexp.MustCompile(`(?i)(nova|novo)\s+(instru[çc][ãõo]|instru[çc][õo]es|prompt|diretriz|regra)`), ""},
+		{regexp.MustCompile(`(?i)(desconsidere?|desobede[çc]a|ignore|esque[çc]a)\s+(tudo(\s+que)?\s+)?((dito\s+)?(antes|acima)\s+)?(as\s+)?(instru[çc](?:[ãa]o|[õo]es)|diretrizes?|regras?)`), ""},
+		{regexp.MustCompile(`(?i)(revele|mostre|imprima|repita|diga|copie)\s+(seu\s+|o\s+|a\s+)?(prompt(\s+do\s+sistema)?|instru[çc](?:[ãa]o|[õo]es)(\s+do\s+sistema)?|diretrizes?)`), ""},
+		{regexp.MustCompile(`(?i)\b(finja|aja)\s+que\s+.*?\b(desenvolvedor|admin\w*|root|sistema|assistente|ia|gpt)\b`), ""},
+		{regexp.MustCompile(`(?i)(nova|novo)\s+(instru[çc](?:[ãa]o|[õo]es)|prompt|diretriz|regra)`), ""},
 	}
 )
 
